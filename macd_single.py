@@ -19,14 +19,14 @@ cross = np.where((macd > signal) & (macd.shift() <= signal.shift()),  1,
 pos = pd.Series(cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
 
 # =====================  SINGLE RUN (NO STOP-LOSS) =============================
-LEVERAGE = 2.0
+LEVERAGE = 3.3
 curve    = [10000]
 in_pos   = 0
 entry_p  = None
 entry_d  = None
 trades   = []
 stp = False
-stp_pct = 0.006
+stp_pct = 0.029
 days_stp = 0
 stp_cnt = 0
 stp_cnt_max = 0
