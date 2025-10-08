@@ -1,1 +1,1 @@
-worker: python ask_deepseek.py
+worker: python macd.py
