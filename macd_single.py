@@ -174,6 +174,12 @@ g_month = monthly_ret.mean()
 sigma_m = monthly_ret.std()
 g_year  = (1 + g_month)**12 - 1
 
+daily_ret = curve.pct_change().dropna()
+monthly_vol_real = daily_ret.std() * np.sqrt(21)   # 21 trading days ≈ 1 month
+print(f'\nRealised monthly volatility: {monthly_vol_real*100:.2f} %')
+
+
+
 print('\n----- DCA plan (50 € every month) -----')
 print(f'Strategy monthly return (mean): {g_month*100:5.2f} %')
 print(f'Strategy yearly return (geom):  {g_year*100:5.2f} %')
@@ -185,7 +191,3 @@ for yrs in (1, 2, 5):
     print(f'Expected value after {yrs:>2.0f} year(s): {fv:7.0f} €')
 
 # ------------------------------------------------ true realised monthly vol ---
-daily_ret = curve.pct_change().dropna()
-monthly_vol_real = daily_ret.std() * np.sqrt(21)   # 21 trading days ≈ 1 month
-print(f'\nRealised monthly volatility: {monthly_vol_real*100:.2f} %')
-
