@@ -183,3 +183,9 @@ for yrs in (1, 2, 5):
     n = yrs * 12
     fv = 50 * (1 + g_month) * ((1 + g_month)**n - 1) / g_month if g_month else 50 * n
     print(f'Expected value after {yrs:>2.0f} year(s): {fv:7.0f} €')
+
+# ------------------------------------------------ true realised monthly vol ---
+daily_ret = curve.pct_change().dropna()
+monthly_vol_real = daily_ret.std() * np.sqrt(21)   # 21 trading days ≈ 1 month
+print(f'\nRealised monthly volatility: {monthly_vol_real*100:.2f} %')
+
