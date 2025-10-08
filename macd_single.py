@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+MACD + 3.3× lever BTC strategy – full single-run script
+Prints every-day equity curve, trade list, performance stats,
+and the DCA projection (50 € deposited every month).
+"""
 
 import pandas as pd
 import numpy as np
@@ -152,7 +159,27 @@ time.sleep(1)
 # ---------------------  DAY-BY-DAY EQUITY CURVE (first 10 rows) ---------------
 print('\n----- equity curve (day-by-day) -----')
 print('date       close      equity')
-for idx, row in df.head(10).iterrows():          # <-- only first 10 rows
+for idx, row in df.head(10).iterrows():
     print(f"{row['date'].strftime('%Y-%m-%d')}  "
           f"{row['close']:>10.2f}  "
           f"{curve[idx]:>10.2f}")
+
+# ------------------------------------------------ DCA projection --------------
+curve_df = pd.DataFrame({'date': df['date'], 'equity': curve})
+curve_df = curve_df.set_index('date')
+monthly_eq = curve_df['equity'].resample('M').last()
+monthly_ret = monthly_eq.pct_change().dropna()
+
+g_month = monthly_ret.mean()
+sigma_m = monthly_ret.std()
+g_year  = (1 + g_month)**12 - 1
+
+print('\n----- DCA plan (50 € every month) -----')
+print(f'Strategy monthly return (mean): {g_month*100:5.2f} %')
+print(f'Strategy yearly return (geom):  {g_year*100:5.2f} %')
+print(f'Monthly volatility:             {sigma_m*100:5.2f} %')
+
+for yrs in (1, 2, 5):
+    n = yrs * 12
+    fv = 50 * (1 + g_month) * ((1 + g_month)**n - 1) / g_month if g_month else 50 * n
+    print(f'Expected value after {yrs:>2.0f} year(s): {fv:7.0f} €')
