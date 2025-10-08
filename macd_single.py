@@ -1,5 +1,4 @@
-run different leverage values 
-1 1.1 ... 5
+
 import pandas as pd
 import numpy as np
 import time
