@@ -53,6 +53,16 @@ for i in range(1, len(df)):
             stp_cnt += 1
             stp_cnt_max = max(stp_cnt_max, stp_cnt)
 
+    print(f"POS {in_pos}  "
+       f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+       f" STOP @ {df['close'].iloc[i]:>10.2f}  "
+       f" CURVE {curve[-1]}"
+       f" PRICE {entry_p}"
+       f" POS {in_pos}"
+       f" HIGH {df['high'].iloc[i]}"
+       f" LOW {df['high'].iloc[i]}"
+       f" STOP {stp}")
+  
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
         in_pos       = pos_i
@@ -61,16 +71,9 @@ for i in range(1, len(df)):
         just_entered = True
         stp          = False
         curve.append(curve[-1])         # no P&L on entry day
-        print(f"ENTRY {in_pos}  "
-             f"PRICE {entry_p}"
-             f"HIGH {df['high'].iloc[i]}"
-             f"LOW {df['high'].iloc[i]}")
+      
         continue                        # skip to next bar
-    else:
-      print(f"POS {in_pos}  "
-             f"PRICE {entry_p}"
-             f"HIGH {df['high'].iloc[i]}"
-             f"LOW {df['high'].iloc[i]}")
+      
   
     # ----- exit on opposite cross ---------------------------------------------
     if in_pos != 0 and pos_i == -in_pos:
@@ -91,20 +94,11 @@ for i in range(1, len(df)):
     if stp:
         curve.append(stp_price)
         days_stp += 1
-        print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-              f"STOP @ {df['close'].iloc[i]:>10.2f}  "
-              f"CURVE {curve[-1]}")
     elif just_entered:                  # first bar after entry – no P&L
         curve.append(curve[-1])
-        print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-              f" {df['close'].iloc[i]:>10.2f}  "
-              f"CURVE {curve[-1]}")
         just_entered = False
     else:                               # normal bar
         curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
-        print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-              f" {df['close'].iloc[i]:>10.2f}  "
-              f"CURVE {curve[-1]}")
 
     time.sleep(0.01)
 
