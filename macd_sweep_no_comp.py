@@ -53,7 +53,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
         pos_i  = pos.iloc[i]
         stp_ret = 0
 
-        # ----- stop-loss check (intraday) -----------------------------------
+        # ----- stop-loss check (intraday) ---------------------------------------
         if stp != True and in_pos != 0:
             r_hi = (p_prev / df['high'].iloc[i] - 1) * in_pos
             r_lo = (p_prev / df['low'].iloc[i]  - 1) * in_pos
@@ -62,8 +62,11 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
                 stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
                 stp_cnt += 1
                 stp_cnt_max = max(stp_cnt_max, stp_cnt)
-                stp_ret = -stp_pct*LEVERAGE 
-        # ----- entry logic ----------------------------------------------------
+                stp_ret = -stp_price*LEVERAGE
+
+
+  
+        # ----- entry logic --------------------------------------------------------
         if in_pos == 0 and pos_i != 0:
             in_pos       = pos_i
             entry_p      = p_prev
@@ -79,18 +82,26 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
                 stp_cnt_max = max(stp_cnt_max, stp_cnt)
                 curve.append(stp_price)
             else: 
-                curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))    
-              
-            trades.append((entry_d, df['date'].iloc[i],
-                stp_ret if stp else daily_ret))
-            stp_ret = 0
-      continue
-
-        # ----- exit on opposite cross ----------------------------------------
+                curve.append(curve[-1])     
+            print(f"{pos_i}"
+              f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+              f" ENTRY PRICE {entry_p}"
+              f" POS {in_pos}"
+              f" HIGH {df['high'].iloc[i]}"
+              f" LOW {df['low'].iloc[i]}"
+              f" CLOSE {df['close'].iloc[i]:>10.2f}  "
+              f" STOP {stp}"
+              f" CURVE {curve[-1]}"
+              f" JUST ENTERED")
+            continue                        # skip to next bar
+      
+  
+        # ----- exit on opposite cross ---------------------------------------------
         if in_pos != 0 and pos_i == -in_pos:
+            daily_ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
             trades.append((entry_d, df['date'].iloc[i],
-                stp_ret if stp else daily_ret))
-            stp_ret = 0            
+                          stp_ret if stp else daily_ret))
+            stp_ret = 0
             if not stp and daily_ret >= 0:
                 stp_cnt = 0
             else:
@@ -100,22 +111,39 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
             if stp:
                 curve.append(stp_price)
                 days_stp += 1
-            else:
-                curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+            else:                               # normal bar
+                curve.append(curve[-1] * (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE))
+        
             in_pos = 0
             stp    = False
-            continue
-
-        # ----- equity update --------------------------------------------------
+            print(f"{pos_i}"
+              f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+              f" ENTRY PRICE {entry_p}"
+              f" POS {in_pos}"
+              f" HIGH {df['high'].iloc[i]}"
+              f" LOW {df['low'].iloc[i]}"
+              f" CLOSE {df['close'].iloc[i]:>10.2f}  "
+              f" STOP {stp}"
+              f" CURVE {curve[-1]}"
+              f" CROSSING")
+            continue 
+        # ----- equity update -------------------------------------------------------
         if stp:
             curve.append(stp_price)
             days_stp += 1
-        else:
-            curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
-        trades.append((entry_d, df['date'].iloc[i],
-            stp_ret if stp else daily_ret))
-        stp_ret = 0
+        else:                               # normal bar
+            curve.append(curve[-1])
 
+        print(f"{pos_i}"
+           f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+           f" ENTRY PRICE {entry_p}"
+           f" POS {in_pos}"
+           f" HIGH {df['high'].iloc[i]}"
+           f" LOW {df['low'].iloc[i]}"
+           f" CLOSE {df['close'].iloc[i]:>10.2f}  "
+           f" STOP {stp}"
+           f" CURVE {curve[-1]}")
+        time.sleep(0.02)
     curve = pd.Series(curve, index=df.index)
 
     # ---------------------------  METRICS  -----------------------------------
