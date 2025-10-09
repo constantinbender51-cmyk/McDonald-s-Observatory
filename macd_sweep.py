@@ -69,7 +69,15 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
             entry_d      = df['date'].iloc[i]
             just_entered = True
             stp          = False
-            curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+            r_hi = (p_prev / df['high'].iloc[i] - 1) * in_pos
+            r_lo = (p_prev / df['low'].iloc[i]  - 1) * in_pos
+            if  r_hi >= stp_pct or r_lo >= stp_pct:
+                stp = True
+                stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
+                stp_cnt += 1
+                stp_cnt_max = max(stp_cnt_max, stp_cnt)
+            else: 
+                curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))         # no P&L on entry day
             continue
 
         # ----- exit on opposite cross ----------------------------------------
