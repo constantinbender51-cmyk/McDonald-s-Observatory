@@ -64,7 +64,7 @@ for i in range(1, len(df)):
         print(f"ENTRY {in_pos}  "
              f"PRICE {entry_p}"
              f"HIGH {df['high'].iloc[i]}"
-             f"LOW {df['high'].iloc[i]")
+             f"LOW {df['high'].iloc[i]"})
         continue                        # skip to next bar
     else:
       print(f"POS {in_pos}  "
