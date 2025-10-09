@@ -85,7 +85,7 @@ for i in range(1, len(df)):
           f"CURVE {curve[-1]}")
       
     else:
-      curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+      curve.append(curve[-1] * (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE))
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f" {df['close'].iloc[i]:>10.2f}  "
           f"CURVE {curve[-1]}")
