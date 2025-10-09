@@ -23,6 +23,40 @@ signal = macd.ewm(span=9, min_periods=9, adjust=False).mean()
 cross = np.where((macd > signal) & (macd.shift() <= signal.shift()),  1,
                 np.where((macd < signal) & (macd.shift() >= signal.shift()), -1, 0))
 pos = pd.Series(cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
+# --------------------  Stochastic RSI -----------------------------------------
+def stoch_rsi(series, rsi_len=14, stoch_len=14, smooth_k=3, smooth_d=3):
+    """Trading-View style Stochastic-RSI: returns (K, D)"""
+    delta = series.diff()
+    gain  = np.where(delta > 0, delta, 0)
+    loss  = np.where(delta < 0, -delta, 0)
+    avg_gain = pd.Series(gain).rolling(rsi_len).mean()
+    avg_loss = pd.Series(loss).rolling(rsi_len).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+
+    stoch = (rsi - rsi.rolling(stoch_len).min()) / \
+            (rsi.rolling(stoch_len).max() - rsi.rolling(stoch_len).min()) * 100
+    k = stoch.rolling(smooth_k).mean()
+    d = k.rolling(smooth_d).mean()
+    return k, d
+
+k, d = stoch_rsi(df['close'])          # K = blue, D = orange
+
+# ---- Stoch-RSI position mask -------------------------------------------------
+stoch_cross = np.where((k > d) & (k.shift() <= d.shift()) & (k <= 20),  1,
+              np.where((k < d) & (k.shift() >= d.shift()) & (k >= 80), -1, 0))
+pos_stoch = pd.Series(stoch_cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
+
+# ---- quick overlay: both signals in one frame -------------------------------
+signal_df = pd.DataFrame({
+    'date'      : df['date'],
+    'close'     : df['close'],
+    'macd_pos'  : pos,
+    'stoch_pos' : pos_stoch
+})
+
+print('\n----- first 10 rows: MACD vs Stoch-RSI position -----')
+print(signal_df.head(10).to_string(index=False))
 
 # =====================  SINGLE RUN (WITH 2.9 % STOP) ==========================
 LEVERAGE = 1
