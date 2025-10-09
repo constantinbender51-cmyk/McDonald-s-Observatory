@@ -4,7 +4,7 @@ from pathlib import Path
 from sklearn.metrics import classification_report, confusion_matrix
 
 # ---------- 1. load ----------
-CSV_FILE = Path("daily_btc.csv")   # <-- same CSV you already have
+CSV_FILE = Path("btc_daily.csv")   # <-- same CSV you already have
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 close = df["close"].astype(float)
 
