@@ -83,7 +83,7 @@ for i in range(1, len(df)):
 
     # ----- equity update -------------------------------------------------------
     if stp == True:
-      curve.append(stp_price)
+      curve.append(curve[-1])
       days_stp=days_stp+1
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f"STOP @ {df['close'].iloc[i]:>10.2f}  "
