@@ -117,7 +117,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
             curve.append(curve[-1])
 
         
-        time.sleep(0.02)
+        
     curve = pd.Series(curve, index=df.index)
 
     # ---------------------------  METRICS  -----------------------------------
@@ -151,6 +151,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
                           lose_streak.diff().ne(0).cumsum()).sum().max()
     print(f"{LEVERAGE/50*100}"
               f"%")
+    time.sleep(0.01)
 
     # store row
     results.append(dict(
