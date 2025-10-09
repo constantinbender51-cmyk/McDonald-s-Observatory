@@ -68,14 +68,14 @@ combined = combined.ffill().fillna(0)      # 0 before the very first signal
 # -----------------------------------------------------------------------------
 
 # =====================  SINGLE RUN (WITH 2.9 % STOP) ==========================
-LEVERAGE = 5.0
+LEVERAGE = 1.0
 curve      = [10000]
 in_pos     = 0
 entry_p    = None
 entry_d    = None
 trades     = []
 stp        = False
-stp_pct    = 0.016
+stp_pct    = 0.99
 days_stp   = 0
 stp_cnt    = 0
 stp_cnt_max= 0
@@ -84,7 +84,7 @@ just_entered= False
 for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
     p_now  = df['close'].iloc[i]
-    pos_i  = pos.iloc[i]          # <<<< changed from pos.iloc[i]
+    pos_i  = pos_stoch.iloc[i]          # <<<< changed from pos.iloc[i]
     stp_ret= 0
 
     # ----- stop-loss check (intraday) ---------------------------------------
