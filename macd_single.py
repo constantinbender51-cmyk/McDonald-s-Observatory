@@ -42,6 +42,7 @@ for i in range(1, len(df)):
     p_now  = df['close'].iloc[i]
     pos_i  = pos.iloc[i]
     exit = False
+    ret = 1
     
     if stp != True and in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
       stp = True
@@ -79,6 +80,7 @@ for i in range(1, len(df)):
         in_pos = 0
         stp = False
         print(f"CROSS TRADE {trades[-1]}  ")
+        ret = (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE)
 
     # ----- equity update -------------------------------------------------------
     if stp == True:
@@ -91,8 +93,8 @@ for i in range(1, len(df)):
       
     else:
       if exit == True: 
-        curve.append(curve[-1] * (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE))
-        print(f"COMPOUNDING {(1 + (p_now/entry_p - 1) * in_pos * LEVERAGE)}  ")
+        curve.append(curve[-1] * ret)
+        print(f"COMPOUNDING {ret}  ")
       else:
         curve.append(curve[-1])
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
