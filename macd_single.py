@@ -45,9 +45,9 @@ for i in range(1, len(df)):
 
     # ----- stop-loss check (intraday) ---------------------------------------
     if stp != True and in_pos != 0:
-        r_hi = (entry_p / df['high'].iloc[i] - 1) * in_pos
-        r_lo = (entry_p / df['low'].iloc[i]  - 1) * in_pos
-        if (1 - p_now/p_prev) * in_pos >= stp_pct:
+        r_hi = (p_prev / df['high'].iloc[i] - 1) * in_pos
+        r_lo = (p_prev / df['low'].iloc[i]  - 1) * in_pos
+        if  r_hi >= stp_pct or r_lo >= stp_pct:
             stp = True
             stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
             stp_cnt += 1
