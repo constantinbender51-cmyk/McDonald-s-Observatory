@@ -71,8 +71,13 @@ for i in range(1, len(df)):
             stp_cnt_max = max(stp_cnt_max, stp_cnt)
             curve.append(stp_price)
         else: 
-            curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))         # no P&L on entry day
-        
+            curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))     
+          # no P&L on entry day
+
+        daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
+        trades.append((entry_d, df['date'].iloc[i],
+                      -stp_pct*LEVERAGE if stp else daily_ret))
+
         print(f"{pos_i}"
           f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f" ENTRY PRICE {entry_p}"
@@ -131,6 +136,10 @@ for i in range(1, len(df)):
        f" CLOSE {df['close'].iloc[i]:>10.2f}  "
        f" STOP {stp}"
        f" CURVE {curve[-1]}")
+    daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
+    trades.append((entry_d, df['date'].iloc[i],
+                      -stp_pct*LEVERAGE if stp else daily_ret))
+
     time.sleep(0.02)
 
 curve = pd.Series(curve, index=df.index)
