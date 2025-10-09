@@ -41,8 +41,6 @@ for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
     p_now  = df['close'].iloc[i]
     pos_i  = pos.iloc[i]
-    exit = False
-    ret = 1
     
     if stp != True and in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
       stp = True
@@ -50,7 +48,6 @@ for i in range(1, len(df)):
       stp_cnt=stp_cnt+1
       if stp_cnt_max<stp_cnt:
               stp_cnt_max=stp_cnt_max
-      exit = True
       
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
@@ -66,7 +63,6 @@ for i in range(1, len(df)):
         ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
         if stp == True:
           trades.append((entry_d, df['date'].iloc[i], -stp_pct*LEVERAGE))
-          ret = -stp_pct*LEVERAGE
         else:
           trades.append((entry_d, df['date'].iloc[i], ret))
           if ret >= 0:
@@ -75,31 +71,24 @@ for i in range(1, len(df)):
             stp_cnt=stp_cnt+1
             if stp_cnt_max<stp_cnt:
               stp_cnt_max=stp_cnt
-        exit = True
+              
         in_pos = 0
         stp = False
         print(f"CROSS TRADE {trades[-1]}  ")
-        
 
     # ----- equity update -------------------------------------------------------
     if stp == True:
-      curve.append(curve[-1])
+      curve.append(stp_price)
       days_stp=days_stp+1
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f"STOP @ {df['close'].iloc[i]:>10.2f}  "
-          f"CURVE {curve[-1]}"
-          f" EXIT == {exit}")
+          f"CURVE {curve[-1]}")
       
     else:
-      if exit == True: 
-        curve.append(curve[-1] * (1 + ret))
-        print(f"COMPOUNDING {ret}  ")
-      else:
-        curve.append(curve[-1])
+      curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f" {df['close'].iloc[i]:>10.2f}  "
-          f"CURVE {curve[-1]}"
-          f" EXIT == {exit}")
+          f"CURVE {curve[-1]}")
     time.sleep(0.01)
 
 curve = pd.Series(curve, index=df.index)
@@ -174,45 +163,3 @@ for idx, row in df.head(10).iterrows():
     print(f"{row['date'].strftime('%Y-%m-%d')}  "
           f"{row['close']:>10.2f}  "
           f"{curve[idx]:>10.2f}")
-
-# ------------------------------------------------ DCA projection --------------
-curve_df = pd.DataFrame({'date': df['date'], 'equity': curve})
-curve_df = curve_df.set_index('date')
-monthly_eq = curve_df['equity'].resample('M').last()
-monthly_ret = monthly_eq.pct_change().dropna()
-
-g_month = monthly_ret.mean()
-sigma_m = monthly_ret.std()
-g_year  = (1 + g_month)**12 - 1
-
-daily_ret = curve.pct_change().dropna()
-monthly_vol_real = daily_ret.std() * np.sqrt(21)   # 21 trading days ≈ 1 month
-print(f'\nRealised monthly volatility: {monthly_vol_real*100:.2f} %')
-
-
-
-print('\n----- DCA plan (50 € every month) -----')
-print(f'Strategy monthly return (mean): {g_month*100:5.2f} %')
-print(f'Strategy yearly return (geom):  {g_year*100:5.2f} %')
-print(f'Monthly volatility:             {sigma_m*100:5.2f} %')
-
-for yrs in (1, 2, 5):
-    n = yrs * 12
-    fv = 50 * (1 + g_month) * ((1 + g_month)**n - 1) / g_month if g_month else 50 * n
-    print(f'Expected value after {yrs:>2.0f} year(s): {fv:7.0f} €')
-
-# ---------------------------  TRADE-LEVEL COMPOUNDING  -------------------------
-trade_dates = [t[1] for t in trades]          # exit dates
-trade_rets  = [t[2] for t in trades]          # log returns (already %)
-
-# Compounded equity curve (reset base = 1)
-trade_curve = (1 + pd.Series(trade_rets, index=trade_dates)).cumprod() * 10000
-
-# ---------------------------  MONTHLY RETURNS  --------------------------------
-monthly = trade_curve.resample('M').last().pct_change().dropna()
-
-print('\n----- Monthly returns (compounded per trade) -----')
-print(monthly.tail(12))  # last 12 months
-
-print(f'\nExpected 1-month return (mean): {monthly.mean()*100:.2f}%')
-print(f'Monthly volatility:             {monthly.std()*100:.2f}%')
