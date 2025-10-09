@@ -151,6 +151,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
     ))
 
 # ==========================  PRINT GRID  ======================================
+results.sort(key=lambda x: x['calmar'], reverse=True)
 print('lev,stop,final,cagr,vol,sharpe,maxdd,calmar,trades_py,win_rate,payoff,pf,exp,kelly,time_mkt,tail,max_streak')
 for r in results:
     print(f"{r['lev']},{r['stop_pct']},{r['final']:.0f},"
