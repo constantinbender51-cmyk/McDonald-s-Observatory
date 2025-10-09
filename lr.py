@@ -28,7 +28,7 @@ df["volume"]   = df["volume"].astype(float)
 df["vol_chg"]  = df["volume"].pct_change()               # volume change
 
 # MACD components (already stationary-ish)
-macd_line, signal_line, _ = macd(close)
+macd_line, signal_line = macd(close)
 df["macd"]     = macd_line
 df["signal"]   = signal_line
 
