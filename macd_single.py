@@ -87,7 +87,11 @@ for i in range(1, len(df)):
             stp_cnt += 1
             stp_cnt_max = max(stp_cnt_max, stp_cnt)
 
-        curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+        if stp:
+            curve.append(stp_price)
+            days_stp += 1
+        else:                               # normal bar
+            curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
         in_pos = 0
         stp    = False
         print(f"{pos_i}"
