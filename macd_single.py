@@ -62,7 +62,7 @@ for i in range(1, len(df)):
         entry_d      = df['date'].iloc[i]
         just_entered = True
         stp          = False
-        curve.append(curve[-1])         # no P&L on entry day
+        curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))         # no P&L on entry day
         print(f"{pos_i}"
           f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f" ENTRY PRICE {entry_p}"
