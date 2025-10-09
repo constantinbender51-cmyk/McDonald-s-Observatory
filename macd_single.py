@@ -42,6 +42,7 @@ for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
     p_now  = df['close'].iloc[i]
     pos_i  = pos.iloc[i]
+    stp_ret = 0
 
     # ----- stop-loss check (intraday) ---------------------------------------
     if stp != True and in_pos != 0:
@@ -52,6 +53,7 @@ for i in range(1, len(df)):
             stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
             stp_cnt += 1
             stp_cnt_max = max(stp_cnt_max, stp_cnt)
+            stp_ret = -stp_price*LEVERAGE
 
 
   
@@ -76,7 +78,8 @@ for i in range(1, len(df)):
 
         daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
         trades.append((entry_d, df['date'].iloc[i],
-                      -stp_pct*LEVERAGE if stp else daily_ret))
+                      stp_ret if stp else daily_ret))
+        stp_ret = 0
 
         print(f"{pos_i}"
           f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
@@ -95,7 +98,7 @@ for i in range(1, len(df)):
     if in_pos != 0 and pos_i == -in_pos:
         daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
         trades.append((entry_d, df['date'].iloc[i],
-                      -stp_pct*LEVERAGE if stp else daily_ret))
+                      stp_ret if stp else daily_ret))
         if not stp and daily_ret >= 0:
             stp_cnt = 0
         else:
@@ -107,6 +110,7 @@ for i in range(1, len(df)):
             days_stp += 1
         else:                               # normal bar
             curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+        stp_ret = 0
         in_pos = 0
         stp    = False
         print(f"{pos_i}"
@@ -138,7 +142,8 @@ for i in range(1, len(df)):
        f" CURVE {curve[-1]}")
     daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
     trades.append((entry_d, df['date'].iloc[i],
-                      -stp_pct*LEVERAGE if stp else daily_ret))
+                      stp_ret if stp else daily_ret))
+    stp_ret = 0
 
     time.sleep(0.02)
 
