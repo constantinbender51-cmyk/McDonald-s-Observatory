@@ -47,7 +47,7 @@ for i in range(1, len(df)):
     if stp != True and in_pos != 0:
         r_hi = (entry_p / df['high'].iloc[i] - 1) * in_pos
         r_lo = (entry_p / df['low'].iloc[i]  - 1) * in_pos
-        if r_hi >= stp_pct or r_lo >= stp_pct:
+        if (curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE) / curve[-1] - 1 >= -stp_pct:
             stp = True
             stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
             stp_cnt += 1
