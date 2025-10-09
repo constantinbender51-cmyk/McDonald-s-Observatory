@@ -55,8 +55,13 @@ signal_df = pd.DataFrame({
     'stoch_pos' : pos_stoch
 })
 
-print('\n----- first 10 rows: MACD vs Stoch-RSI position -----')
-print(signal_df.head(40).to_string(index=False))
+print('\n----- full series: MACD vs Stoch-RSI position -----\n')
+for _, row in signal_df.iterrows():          # <- every row, not just head(40)
+    print(f"{row['date'].strftime('%Y-%m-%d')}  "
+          f"{row['close']:>10.2f}  "
+          f"MACD {row['macd_pos']:>2.0f}  "
+          f"Stoch-RSI {row['stoch_pos']:>2.0f}")
+    time.sleep(0.01)
 
 # =====================  SINGLE RUN (WITH 2.9 % STOP) ==========================
 LEVERAGE = 1
