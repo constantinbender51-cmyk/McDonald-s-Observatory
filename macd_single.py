@@ -73,7 +73,7 @@ for i in range(1, len(df)):
             stp_cnt=stp_cnt+1
             if stp_cnt_max<stp_cnt:
               stp_cnt_max=stp_cnt
-          exit = True
+        exit = True
           
               
         in_pos = 0
