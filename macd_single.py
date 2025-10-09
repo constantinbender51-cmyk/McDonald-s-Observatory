@@ -192,7 +192,7 @@ for yrs in (1, 2, 5):
 
 # ---------------------------  TRADE-LEVEL COMPOUNDING  -------------------------
 trade_dates = [t[1] for t in trades]          # exit dates
-trade_rets  = [t[2] for t in trades]          % log returns (already %)
+trade_rets  = [t[2] for t in trades]          # log returns (already %)
 
 # Compounded equity curve (reset base = 1)
 trade_curve = (1 + pd.Series(trade_rets, index=trade_dates)).cumprod() * 10000
