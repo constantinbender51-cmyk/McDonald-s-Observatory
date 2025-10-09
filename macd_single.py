@@ -92,6 +92,7 @@ for i in range(1, len(df)):
     else:
       if exit == True: 
         curve.append(curve[-1] * (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE))
+        print(f"COMPOUNDING {(1 + (p_now/entry_p - 1) * in_pos * LEVERAGE)}  ")
       else:
         curve.append(curve[-1])
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
