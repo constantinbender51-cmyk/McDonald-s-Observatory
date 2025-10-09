@@ -22,23 +22,33 @@ macd_line, signal_line = macd(close)
 df["y"] = (close.shift(-1) > close).astype(int)
 
 # ---------- 4. features ----------
-# ----- raw OHLC levels -----
-df["close_lag1"] = close.shift(1)
-df["open_lag1"]  = df["open"].astype(float).shift(1)
-df["high_lag1"]  = df["high"].astype(float).shift(1)
-df["low_lag1"]   = df["low"].astype(float).shift(1)
+# ----- stationary transforms -----
+df["ret"]      = close.pct_change()                      # day-to-day return
+df["volume"]   = df["volume"].astype(float)
+df["vol_chg"]  = df["volume"].pct_change()               # volume change
 
-# ----- MACD same as before -----
-df["macd"] = macd_line
-df["signal"] = signal_line
-df["macd_x"] = ((macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1))).astype(int)
-df["macd_o"] = ((macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1))).astype(int)
+# MACD components (already stationary-ish)
+macd_line, signal_line, _ = macd(close)
+df["macd"]     = macd_line
+df["signal"]   = signal_line
 
-# ----- feature list -----
-FEATURES = ["open_lag1", "high_lag1", "low_lag1", "close_lag1", "macd_x", "macd_o"]
-
-# drop rows with NaNs introduced by lags
+# ----- build feature matrix -----
+FEATURES = ["ret", "vol_chg", "macd", "signal"]
+df[FEATURES] = df[FEATURES].shift(1)          # no peeking
 df.dropna(inplace=True)
+
+# ----- train/test split -----
+split = int(len(df) * 0.8)
+train_df = df.iloc[:split]
+test_df  = df.iloc[split:]
+
+# ----- standardise (fit on train only) -----
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_train = scaler.fit_transform(train_df[FEATURES])
+y_train = train_df["y"].values
+X_test  = scaler.transform(test_df[FEATURES])
+y_test  = test_df["y"].values
 # ---------- 5. split ----------
 split = int(len(df) * 0.8)
 train_df = df.iloc[:split]
