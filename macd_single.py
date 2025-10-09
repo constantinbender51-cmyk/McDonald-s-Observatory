@@ -86,7 +86,8 @@ for i in range(1, len(df)):
       days_stp=days_stp+1
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f"STOP @ {df['close'].iloc[i]:>10.2f}  "
-          f"CURVE {curve[-1]}")
+          f"CURVE {curve[-1]}"
+          f" EXIT == {exit}")
       
     else:
       if exit: 
@@ -95,7 +96,8 @@ for i in range(1, len(df)):
         curve.append(curve[-1])
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f" {df['close'].iloc[i]:>10.2f}  "
-          f"CURVE {curve[-1]}")
+          f"CURVE {curve[-1]}"
+          f" EXIT == {exit}")
     time.sleep(0.01)
 
 curve = pd.Series(curve, index=df.index)
