@@ -190,4 +190,18 @@ for yrs in (1, 2, 5):
     fv = 50 * (1 + g_month) * ((1 + g_month)**n - 1) / g_month if g_month else 50 * n
     print(f'Expected value after {yrs:>2.0f} year(s): {fv:7.0f} €')
 
-# ------------------------------------------------ true realised monthly vol ---
+# ---------------------------  TRADE-LEVEL COMPOUNDING  -------------------------
+trade_dates = [t[1] for t in trades]          # exit dates
+trade_rets  = [t[2] for t in trades]          % log returns (already %)
+
+# Compounded equity curve (reset base = 1)
+trade_curve = (1 + pd.Series(trade_rets, index=trade_dates)).cumprod() * 10000
+
+# ---------------------------  MONTHLY RETURNS  --------------------------------
+monthly = trade_curve.resample('M').last().pct_change().dropna()
+
+print('\n----- Monthly returns (compounded per trade) -----')
+print(monthly.tail(12))  # last 12 months
+
+print(f'\nExpected 1-month return (mean): {monthly.mean()*100:.2f}%')
+print(f'Monthly volatility:             {monthly.std()*100:.2f}%')
