@@ -82,7 +82,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
               
             daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
             trades.append((entry_d, df['date'].iloc[i],
-                      -stp_pct*LEVERAGE if stp else daily_ret))
+                      0 if stp else daily_ret))
             continue
 
         # ----- exit on opposite cross ----------------------------------------
