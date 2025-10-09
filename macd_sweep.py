@@ -114,6 +114,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
             days_stp += 1
         else:
             curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+        daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
         trades.append((entry_d, df['date'].iloc[i],
             stp_ret if stp else daily_ret))
         stp_ret = 0
