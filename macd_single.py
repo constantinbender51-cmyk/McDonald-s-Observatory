@@ -62,7 +62,6 @@ for i in range(1, len(df)):
 
     # ----- exit on opposite cross ---------------------------------------------
     if in_pos != 0 and pos_i == -in_pos:
-        ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
         if stp == True:
           trades.append((entry_d, df['date'].iloc[i], -stp_pct*LEVERAGE))
         else:
