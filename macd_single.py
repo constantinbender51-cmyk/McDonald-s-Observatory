@@ -25,7 +25,7 @@ cross = np.where((macd > signal) & (macd.shift() <= signal.shift()),  1,
 pos = pd.Series(cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
 
 # =====================  SINGLE RUN (WITH 2.9 % STOP) ==========================
-LEVERAGE = 5.0
+LEVERAGE = 1
 curve      = [10000]
 in_pos     = 0
 entry_p    = None
