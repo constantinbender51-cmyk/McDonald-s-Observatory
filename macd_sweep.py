@@ -78,7 +78,11 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
                 stp_cnt_max = max(stp_cnt_max, stp_cnt)
                 curve.append(stp_price)
             else: 
-                curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))         # no P&L on entry day
+                curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))    
+              
+            daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
+            trades.append((entry_d, df['date'].iloc[i],
+                      -stp_pct*LEVERAGE if stp else daily_ret))
             continue
 
         # ----- exit on opposite cross ----------------------------------------
@@ -107,6 +111,10 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
             days_stp += 1
         else:
             curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+        daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
+        trades.append((entry_d, df['date'].iloc[i],
+                      -stp_pct*LEVERAGE if stp else daily_ret))
+  
 
     curve = pd.Series(curve, index=df.index)
 
