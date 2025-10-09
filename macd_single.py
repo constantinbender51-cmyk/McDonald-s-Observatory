@@ -23,6 +23,56 @@ signal = macd.ewm(span=9, min_periods=9, adjust=False).mean()
 cross = np.where((macd > signal) & (macd.shift() <= signal.shift()),  1,
                 np.where((macd < signal) & (macd.shift() >= signal.shift()), -1, 0))
 pos = pd.Series(cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
+# --------------------  Stochastic RSI -----------------------------------------
+def stoch_rsi(series, rsi_len=14, stoch_len=14, smooth_k=3, smooth_d=3):
+    """Trading-View style Stochastic-RSI: returns (K, D)"""
+    delta = series.diff()
+    gain  = np.where(delta > 0, delta, 0)
+    loss  = np.where(delta < 0, -delta, 0)
+    avg_gain = pd.Series(gain).rolling(rsi_len).mean()
+    avg_loss = pd.Series(loss).rolling(rsi_len).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+
+    stoch = (rsi - rsi.rolling(stoch_len).min()) / \
+            (rsi.rolling(stoch_len).max() - rsi.rolling(stoch_len).min()) * 100
+    k = stoch.rolling(smooth_k).mean()
+    d = k.rolling(smooth_d).mean()
+    return k, d
+
+k, d = stoch_rsi(df['close'])          # K = blue, D = orange
+
+# ---- Stoch-RSI position mask -------------------------------------------------
+stoch_cross = np.where((k > d) & (k.shift() <= d.shift()) & (k <= 20),  1,
+              np.where((k < d) & (k.shift() >= d.shift()) & (k >= 80), -1, 0))
+pos_stoch = pd.Series(stoch_cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
+
+# ---- quick overlay: both signals in one frame -------------------------------
+signal_df = pd.DataFrame({
+    'date'      : df['date'],
+    'close'     : df['close'],
+    'macd_pos'  : pos,
+    'stoch_pos' : pos_stoch
+})
+
+print('\n----- full series: MACD vs Stoch-RSI position -----\n')
+for _, row in signal_df.iterrows():          # <- every row, not just head(40)
+    print(f"{row['date'].strftime('%Y-%m-%d')}  "
+          f"{row['close']:>10.2f}  "
+          f"MACD {row['macd_pos']:>2.0f}  "
+          f"Stoch-RSI {row['stoch_pos']:>2.0f}")
+    time.sleep(0.01)
+# ----------  COMBINED SIGNAL  -------------------------------------------------
+# 1  as soon as both =  1  (and stay 1 until both = -1)
+# -1 as soon as both = -1  (and stay -1 until both =  1)
+both_long  = (pos == 1)  & (pos_stoch == 1)
+both_short = (pos == -1) & (pos_stoch == -1)
+
+combined = pd.Series(np.nan, index=df.index)
+combined[both_long]   = 1
+combined[both_short]  = -1
+combined = combined.ffill().fillna(0)      # 0 before the very first signal
+# -----------------------------------------------------------------------------
 
 # =====================  SINGLE RUN (WITH 2.9 % STOP) ==========================
 LEVERAGE = 5.0
@@ -36,27 +86,25 @@ stp_pct    = 0.016
 days_stp   = 0
 stp_cnt    = 0
 stp_cnt_max= 0
-just_entered= False                 # NEW: flag to skip P&L on entry bar
+just_entered= False
 
 for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
     p_now  = df['close'].iloc[i]
-    pos_i  = pos.iloc[i]
-    stp_ret = 0
+    pos_i  = combined.iloc[i]          # <<<< changed from pos.iloc[i]
+    stp_ret= 0
 
     # ----- stop-loss check (intraday) ---------------------------------------
-    if stp != True and in_pos != 0:
+    if stp is not True and in_pos != 0:
         r_hi = (p_prev / df['high'].iloc[i] - 1) * in_pos
         r_lo = (p_prev / df['low'].iloc[i]  - 1) * in_pos
-        if  r_hi >= stp_pct or r_lo >= stp_pct:
+        if r_hi >= stp_pct or r_lo >= stp_pct:
             stp = True
             stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
             stp_cnt += 1
             stp_cnt_max = max(stp_cnt_max, stp_cnt)
             stp_ret = -stp_price*LEVERAGE
 
-
-  
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
         in_pos       = pos_i
@@ -66,34 +114,21 @@ for i in range(1, len(df)):
         stp          = False
         r_hi = (p_prev / df['high'].iloc[i] - 1) * in_pos
         r_lo = (p_prev / df['low'].iloc[i]  - 1) * in_pos
-        if  r_hi >= stp_pct or r_lo >= stp_pct:
+        if r_hi >= stp_pct or r_lo >= stp_pct:
             stp = True
             stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
             stp_cnt += 1
             stp_cnt_max = max(stp_cnt_max, stp_cnt)
             curve.append(stp_price)
-        else: 
-            curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))     
-          # no P&L on entry day
+        else:
+            curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
 
         daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
         trades.append((entry_d, df['date'].iloc[i],
                       stp_ret if stp else daily_ret))
         stp_ret = 0
+        continue
 
-        print(f"{pos_i}"
-          f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-          f" ENTRY PRICE {entry_p}"
-          f" POS {in_pos}"
-          f" HIGH {df['high'].iloc[i]}"
-          f" LOW {df['low'].iloc[i]}"
-          f" CLOSE {df['close'].iloc[i]:>10.2f}  "
-          f" STOP {stp}"
-          f" CURVE {curve[-1]}"
-          f" JUST ENTERED")
-        continue                        # skip to next bar
-      
-  
     # ----- exit on opposite cross ---------------------------------------------
     if in_pos != 0 and pos_i == -in_pos:
         daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
@@ -108,42 +143,25 @@ for i in range(1, len(df)):
         if stp:
             curve.append(stp_price)
             days_stp += 1
-        else:                               # normal bar
+        else:
             curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
         stp_ret = 0
         in_pos = 0
         stp    = False
-        print(f"{pos_i}"
-          f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-          f" ENTRY PRICE {entry_p}"
-          f" POS {in_pos}"
-          f" HIGH {df['high'].iloc[i]}"
-          f" LOW {df['low'].iloc[i]}"
-          f" CLOSE {df['close'].iloc[i]:>10.2f}  "
-          f" STOP {stp}"
-          f" CURVE {curve[-1]}"
-          f" CROSSING")
-        continue 
+        continue
+
     # ----- equity update -------------------------------------------------------
     if stp:
         curve.append(stp_price)
         days_stp += 1
-    else:                               # normal bar
+    else:
         curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
 
-    print(f"{pos_i}"
-       f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-       f" ENTRY PRICE {entry_p}"
-       f" POS {in_pos}"
-       f" HIGH {df['high'].iloc[i]}"
-       f" LOW {df['low'].iloc[i]}"
-       f" CLOSE {df['close'].iloc[i]:>10.2f}  "
-       f" STOP {stp}"
-       f" CURVE {curve[-1]}")
     daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
     trades.append((entry_d, df['date'].iloc[i],
-                      stp_ret if stp else daily_ret))
+                  stp_ret if stp else daily_ret))
     stp_ret = 0
+
 
     time.sleep(0.02)
 
