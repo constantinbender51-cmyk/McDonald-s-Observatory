@@ -95,9 +95,6 @@ for i in range(1, len(df)):
     if stp:
         curve.append(stp_price)
         days_stp += 1
-    elif just_entered:                  # first bar after entry – no P&L
-        curve.append(curve[-1])
-        just_entered = False
     else:                               # normal bar
         curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
 
