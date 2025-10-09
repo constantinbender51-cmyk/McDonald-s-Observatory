@@ -155,9 +155,6 @@ for i in range(1, len(df)):
                   stp_ret if stp else daily_ret))
     stp_ret = 0
 
-
-    time.sleep(0.02)
-
 curve = pd.Series(curve, index=df.index)
 
 # ---------------------------  FULL METRICS  -----------------------------------
