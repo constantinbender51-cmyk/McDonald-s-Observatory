@@ -62,6 +62,17 @@ for _, row in signal_df.iterrows():          # <- every row, not just head(40)
           f"MACD {row['macd_pos']:>2.0f}  "
           f"Stoch-RSI {row['stoch_pos']:>2.0f}")
     time.sleep(0.01)
+# ----------  COMBINED SIGNAL  -------------------------------------------------
+# 1  as soon as both =  1  (and stay 1 until both = -1)
+# -1 as soon as both = -1  (and stay -1 until both =  1)
+both_long  = (pos == 1)  & (pos_stoch == 1)
+both_short = (pos == -1) & (pos_stoch == -1)
+
+combined = pd.Series(np.nan, index=df.index)
+combined[both_long]   = 1
+combined[both_short]  = -1
+combined = combined.ffill().fillna(0)      # 0 before the very first signal
+
 
 # =====================  SINGLE RUN (WITH 2.9 % STOP) ==========================
 LEVERAGE = 1
