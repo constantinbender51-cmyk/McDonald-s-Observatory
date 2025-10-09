@@ -51,6 +51,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
         p_prev = df['close'].iloc[i-1]
         p_now  = df['close'].iloc[i]
         pos_i  = pos.iloc[i]
+        stp_ret = 0
 
         # ----- stop-loss check (intraday) -----------------------------------
         if stp != True and in_pos != 0:
@@ -61,7 +62,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
                 stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
                 stp_cnt += 1
                 stp_cnt_max = max(stp_cnt_max, stp_cnt)
-
+                stp_ret = -stp_pct*LEVERAGE 
         # ----- entry logic ----------------------------------------------------
         if in_pos == 0 and pos_i != 0:
             in_pos       = pos_i
@@ -80,16 +81,16 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
             else: 
                 curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))    
               
-            daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
             trades.append((entry_d, df['date'].iloc[i],
-                      0 if stp else daily_ret))
-            continue
+                stp_ret if stp else daily_ret))
+            stp_ret = 0
+      continue
 
         # ----- exit on opposite cross ----------------------------------------
         if in_pos != 0 and pos_i == -in_pos:
-            daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
             trades.append((entry_d, df['date'].iloc[i],
-                          0 if stp else daily_ret))
+                stp_ret if stp else daily_ret))
+            stp_ret = 0            
             if not stp and daily_ret >= 0:
                 stp_cnt = 0
             else:
@@ -111,10 +112,9 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
             days_stp += 1
         else:
             curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
-        daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
         trades.append((entry_d, df['date'].iloc[i],
-                      0 if stp else daily_ret))
-  
+            stp_ret if stp else daily_ret))
+        stp_ret = 0
 
     curve = pd.Series(curve, index=df.index)
 
