@@ -1,56 +1,76 @@
+import pandas as pd
 import numpy as np
+from pathlib import Path
+from sklearn.metrics import classification_report, confusion_matrix
 
-# ---------- helpers ----------
-def sigmoid(z):
-    z = np.clip(z, -500, 500)          # avoid overflow
-    return 1 / (1 + np.exp(-z))
+# ---------- 1. load ----------
+CSV_FILE = Path("daily_btc.csv")   # <-- same CSV you already have
+df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
+close = df["close"].astype(float)
 
-def add_bias(X):
-    return np.c_[np.ones(X.shape[0]), X]
+# ---------- 2. MACD ----------
+def macd(series, fast=12, slow=26, signal=9):
+    ema_f = series.ewm(span=fast).mean()
+    ema_s = series.ewm(span=slow).mean()
+    macd_line = ema_f - ema_s
+    signal_line = macd_line.ewm(span=signal).mean()
+    return macd_line, signal_line
 
-def cross_entropy(y, p_hat):
-    # y ∈ {0,1}, p_hat = predicted probability
-    p_hat = np.clip(p_hat, 1e-7, 1-1e-7)
-    return -np.mean(y*np.log(p_hat) + (1-y)*np.log(1-p_hat))
+macd_line, signal_line = macd(close)
 
-# ---------- core ----------
+# ---------- 3. label ----------
+df["y"] = (close.shift(-1) > close).astype(int)
+
+# ---------- 4. features ----------
+df["macd"] = macd_line
+df["signal"] = signal_line
+df["macd_x"] = ((macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1))).astype(int)  # cross-up
+df["macd_o"] = ((macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1))).astype(int)  # cross-down
+FEATURES = ["macd_x", "macd_o"]
+df[FEATURES] = df[FEATURES].shift(1)   # no peeking
+df.dropna(inplace=True)
+
+# ---------- 5. split ----------
+split = int(len(df) * 0.8)
+train_df = df.iloc[:split]
+test_df  = df.iloc[split:]
+
+X_train, y_train = train_df[FEATURES].values, train_df["y"].values
+X_test,  y_test  = test_df[FEATURES].values,  test_df["y"].values
+
+# ---------- 6. logistic regression (no external libs) ----------
 class LogisticRegression:
-    def __init__(self, lr=0.1, n_iter=10_000, tol=1e-6):
-        self.lr = lr
-        self.n_iter = n_iter
-        self.tol = tol
-        self.losses = []
-
+    def __init__(self, lr=0.3, n_iter=15_000, tol=1e-6):
+        self.lr, self.n_iter, self.tol = lr, n_iter, tol
     def fit(self, X, y):
-        X = add_bias(X)
-        self.theta = np.zeros(X.shape[1])
+        Xb = np.c_[np.ones(X.shape[0]), X]
+        th = np.zeros(Xb.shape[1])
         for i in range(self.n_iter):
-            z = X @ self.theta
-            p_hat = sigmoid(z)
-            grad = (X.T @ (p_hat - y)) / y.size
-            self.theta -= self.lr * grad
-            self.losses.append(cross_entropy(y, p_hat))
-            if i > 0 and abs(self.losses[-2] - self.losses[-1]) < self.tol:
+            p = 1 / (1 + np.exp(-np.clip(Xb @ th, -500, 500)))
+            g = (Xb.T @ (p - y)) / y.size
+            th_new = th - self.lr * g
+            if np.linalg.norm(th_new - th, ord=1) < self.tol:
                 break
+            th = th_new
+        self._th = th
         return self
-
     def predict_proba(self, X):
-        return sigmoid(add_bias(X) @ self.theta)
+        Xb = np.c_[np.ones(X.shape[0]), X]
+        return 1 / (1 + np.exp(-np.clip(Xb @ self._th, -500, 500)))
+    def predict(self, X):
+        return (self.predict_proba(X) >= 0.5).astype(int)
 
-    def predict(self, X, threshold=0.5):
-        return (self.predict_proba(X) >= threshold).astype(int)
+model = LogisticRegression().fit(X_train, y_train)
+pred = model.predict(X_test)
 
-if __name__ == "__main__":
-    from sklearn.datasets import make_classification
-    from sklearn.model_selection import train_test_split
-    from sklearn.metrics import accuracy_score
+# ---------- 7. console output ----------
+print("=== MACD crossover logistic-regression results ===")
+print("Confusion matrix (test set):")
+print(confusion_matrix(y_test, pred))
+print("\nClassification report:")
+print(classification_report(y_test, pred, digits=3))
 
-    X, y = make_classification(n_samples=1000, n_features=20,
-                               n_informative=2, n_redundant=10,
-                               random_state=42)
-    X_train, X_test, y_train, y_test = train_test_split(X, y,
-                                        test_size=0.2, random_state=42)
-
-    model = LogisticRegression(lr=0.3, n_iter=20_000).fit(X_train, y_train)
-    print("Accuracy:", accuracy_score(y_test, model.predict(X_test)))
-    
+# optional: show last few predictions vs actual
+print("\nLast 10 predictions vs actual:")
+out = pd.DataFrame({"actual": y_test[-10:], "pred": pred[-10:]})
+print(out.to_string(index=False))
