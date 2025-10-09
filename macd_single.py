@@ -66,6 +66,7 @@ for i in range(1, len(df)):
         ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
         if stp == True:
           trades.append((entry_d, df['date'].iloc[i], -stp_pct*LEVERAGE))
+          ret = -stp_pct*LEVERAGE
         else:
           trades.append((entry_d, df['date'].iloc[i], ret))
           if ret >= 0:
