@@ -41,6 +41,7 @@ for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
     p_now  = df['close'].iloc[i]
     pos_i  = pos.iloc[i]
+    exit = False
     
     if stp != True and in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
       stp = True
@@ -48,6 +49,7 @@ for i in range(1, len(df)):
       stp_cnt=stp_cnt+1
       if stp_cnt_max<stp_cnt:
               stp_cnt_max=stp_cnt_max
+      exit = True
       
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
@@ -71,6 +73,8 @@ for i in range(1, len(df)):
             stp_cnt=stp_cnt+1
             if stp_cnt_max<stp_cnt:
               stp_cnt_max=stp_cnt
+          exit = True
+          
               
         in_pos = 0
         stp = False
@@ -85,7 +89,10 @@ for i in range(1, len(df)):
           f"CURVE {curve[-1]}")
       
     else:
-      curve.append(curve[-1] * (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE))
+      if exit: 
+        curve.append(curve[-1] * (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE))
+      else:
+        curve.append(curve[-1])
       print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f" {df['close'].iloc[i]:>10.2f}  "
           f"CURVE {curve[-1]}")
