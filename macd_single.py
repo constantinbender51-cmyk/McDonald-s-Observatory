@@ -96,7 +96,7 @@ for i in range(1, len(df)):
             stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
             stp_cnt += 1
             stp_cnt_max = max(stp_cnt_max, stp_cnt)
-            stp_ret = -stp_price*LEVERAGE
+            stp_ret = -stp_pct*LEVERAGE
 
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
