@@ -91,7 +91,7 @@ just_entered= False
 for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
     p_now  = df['close'].iloc[i]
-    pos_i  = combined.iloc[i]          # <<<< changed from pos.iloc[i]
+    pos_i  = pos.iloc[i]          # <<<< changed from pos.iloc[i]
     stp_ret= 0
 
     # ----- stop-loss check (intraday) ---------------------------------------
