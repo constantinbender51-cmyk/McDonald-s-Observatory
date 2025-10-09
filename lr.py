@@ -22,14 +22,23 @@ macd_line, signal_line = macd(close)
 df["y"] = (close.shift(-1) > close).astype(int)
 
 # ---------- 4. features ----------
+# ----- raw OHLC levels -----
+df["close_lag1"] = close.shift(1)
+df["open_lag1"]  = df["open"].astype(float).shift(1)
+df["high_lag1"]  = df["high"].astype(float).shift(1)
+df["low_lag1"]   = df["low"].astype(float).shift(1)
+
+# ----- MACD same as before -----
 df["macd"] = macd_line
 df["signal"] = signal_line
-df["macd_x"] = ((macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1))).astype(int)  # cross-up
-df["macd_o"] = ((macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1))).astype(int)  # cross-down
-FEATURES = ["macd_x", "macd_o"]
-df[FEATURES] = df[FEATURES].shift(1)   # no peeking
-df.dropna(inplace=True)
+df["macd_x"] = ((macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1))).astype(int)
+df["macd_o"] = ((macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1))).astype(int)
 
+# ----- feature list -----
+FEATURES = ["open_lag1", "high_lag1", "low_lag1", "close_lag1", "macd_x", "macd_o"]
+
+# drop rows with NaNs introduced by lags
+df.dropna(inplace=True)
 # ---------- 5. split ----------
 split = int(len(df) * 0.8)
 train_df = df.iloc[:split]
