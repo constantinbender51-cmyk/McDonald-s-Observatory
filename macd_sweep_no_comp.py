@@ -175,13 +175,11 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
     ))
 
 # ==========================  PRINT GRID  ======================================
-results.sort(key=lambda x: x['calmar'], reverse=True)
-print('lev,stop,final,cagr,vol,sharpe,maxdd,calmar,trades_py,win_rate,payoff,pf,exp,kelly,time_mkt,tail,max_streak')
-for r in results:
+# print only the 10 best Calmar results
+for r in sorted(results, key=lambda x: x['calmar'], reverse=True)[:10]:
     print(f"{r['lev']},{r['stop_pct']},{r['final']:.0f},"
           f"{r['cagr']*100:.2f},{r['vol']*100:.2f},{r['sharpe']:.2f},"
           f"{r['maxdd']*100:.2f},{r['calmar']:.2f},{r['trades_py']:.1f},"
           f"{r['win_rate']*100:.1f},{r['payoff']:.2f},{r['pf']:.2f},"
           f"{r['exp']*100:.2f},{r['kelly']*100:.2f},{r['time_mkt']*100:.1f},"
           f"{r['tail']:.2f},{r['max_streak']:.0f}")
-    time.sleep(0.05)
