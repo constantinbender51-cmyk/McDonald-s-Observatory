@@ -75,12 +75,10 @@ for i in range(1, len(df)):
             if stp_cnt_max<stp_cnt:
               stp_cnt_max=stp_cnt
         exit = True
-          
-              
         in_pos = 0
         stp = False
         print(f"CROSS TRADE {trades[-1]}  ")
-        ret = (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE)
+        
 
     # ----- equity update -------------------------------------------------------
     if stp == True:
@@ -93,7 +91,7 @@ for i in range(1, len(df)):
       
     else:
       if exit == True: 
-        curve.append(curve[-1] * ret)
+        curve.append(curve[-1] * (1 + ret))
         print(f"COMPOUNDING {ret}  ")
       else:
         curve.append(curve[-1])
