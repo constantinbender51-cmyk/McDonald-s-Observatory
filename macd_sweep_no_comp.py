@@ -83,16 +83,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
                 curve.append(stp_price)
             else: 
                 curve.append(curve[-1])     
-            print(f"{pos_i}"
-              f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-              f" ENTRY PRICE {entry_p}"
-              f" POS {in_pos}"
-              f" HIGH {df['high'].iloc[i]}"
-              f" LOW {df['low'].iloc[i]}"
-              f" CLOSE {df['close'].iloc[i]:>10.2f}  "
-              f" STOP {stp}"
-              f" CURVE {curve[-1]}"
-              f" JUST ENTERED")
+            
             continue                        # skip to next bar
       
   
@@ -116,16 +107,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
         
             in_pos = 0
             stp    = False
-            print(f"{pos_i}"
-              f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-              f" ENTRY PRICE {entry_p}"
-              f" POS {in_pos}"
-              f" HIGH {df['high'].iloc[i]}"
-              f" LOW {df['low'].iloc[i]}"
-              f" CLOSE {df['close'].iloc[i]:>10.2f}  "
-              f" STOP {stp}"
-              f" CURVE {curve[-1]}"
-              f" CROSSING")
+            
             continue 
         # ----- equity update -------------------------------------------------------
         if stp:
@@ -134,15 +116,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
         else:                               # normal bar
             curve.append(curve[-1])
 
-        print(f"{pos_i}"
-           f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-           f" ENTRY PRICE {entry_p}"
-           f" POS {in_pos}"
-           f" HIGH {df['high'].iloc[i]}"
-           f" LOW {df['low'].iloc[i]}"
-           f" CLOSE {df['close'].iloc[i]:>10.2f}  "
-           f" STOP {stp}"
-           f" CURVE {curve[-1]}")
+        
         time.sleep(0.02)
     curve = pd.Series(curve, index=df.index)
 
@@ -175,6 +149,8 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
     lose_streak = (trades_ret < 0).astype(int)
     max_lose_streak = lose_streak.groupby(
                           lose_streak.diff().ne(0).cumsum()).sum().max()
+    print(f"{LEVERAGE/50*100}"
+              f"%")
 
     # store row
     results.append(dict(
