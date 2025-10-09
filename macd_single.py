@@ -120,6 +120,16 @@ for i in range(1, len(df)):
         trades.append((entry_d, df['date'].iloc[i],
                       stp_ret if stp else daily_ret))
         stp_ret = 0
+        print(f"{in_pos}"
+          f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+          f" ENTRY PRICE {entry_p}"
+          f" POS {in_pos}"
+          f" HIGH {df['high'].iloc[i]}"
+          f" LOW {df['low'].iloc[i]}"
+          f" CLOSE {df['close'].iloc[i]:>10.2f}  "
+          f" STOP {stp}"
+          f" CURVE {curve[-1]}"
+          f" JUST ENTERED")
         continue
 
     # ----- exit on opposite cross ---------------------------------------------
@@ -141,6 +151,16 @@ for i in range(1, len(df)):
         stp_ret = 0
         in_pos = 0
         stp    = False
+        print(f"{in_pos}"
+          f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+          f" ENTRY PRICE {entry_p}"
+          f" POS {in_pos}"
+          f" HIGH {df['high'].iloc[i]}"
+          f" LOW {df['low'].iloc[i]}"
+          f" CLOSE {df['close'].iloc[i]:>10.2f}  "
+          f" STOP {stp}"
+          f" CURVE {curve[-1]}"
+          f" CROSSING")
         continue
 
     # ----- equity update -------------------------------------------------------
@@ -154,6 +174,16 @@ for i in range(1, len(df)):
     trades.append((entry_d, df['date'].iloc[i],
                   stp_ret if stp else daily_ret))
     stp_ret = 0
+    print(f"{in_pos}"
+          f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+          f" ENTRY PRICE {entry_p}"
+          f" POS {in_pos}"
+          f" HIGH {df['high'].iloc[i]}"
+          f" LOW {df['low'].iloc[i]}"
+          f" CLOSE {df['close'].iloc[i]:>10.2f}  "
+          f" STOP {stp}"
+          f" CURVE {curve[-1]}"
+          f" UPDATE")
 
 curve = pd.Series(curve, index=df.index)
 
