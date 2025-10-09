@@ -24,74 +24,80 @@ cross = np.where((macd > signal) & (macd.shift() <= signal.shift()),  1,
                 np.where((macd < signal) & (macd.shift() >= signal.shift()), -1, 0))
 pos = pd.Series(cross, index=df.index).replace(0, np.nan).ffill().fillna(0)
 
-# =====================  SINGLE RUN (NO STOP-LOSS) =============================
+# =====================  SINGLE RUN (WITH 2.9 % STOP) ==========================
 LEVERAGE = 3.3
-curve    = [10000]
-in_pos   = 0
-entry_p  = None
-entry_d  = None
-trades   = []
-stp = False
-stp_pct = 0.029
-days_stp = 0
-stp_cnt = 0
-stp_cnt_max = 0
+curve      = [10000]
+in_pos     = 0
+entry_p    = None
+entry_d    = None
+trades     = []
+stp        = False
+stp_pct    = 0.029
+days_stp   = 0
+stp_cnt    = 0
+stp_cnt_max= 0
+just_entered= False                 # NEW: flag to skip P&L on entry bar
 
 for i in range(1, len(df)):
     p_prev = df['close'].iloc[i-1]
     p_now  = df['close'].iloc[i]
     pos_i  = pos.iloc[i]
-    
-    if stp != True and in_pos != 0 and ((entry_p/df['high'].iloc[i]-1)*in_pos>=stp_pct or (entry_p/df['low'].iloc[i]-1)*in_pos>=stp_pct):
-      stp = True
-      stp_price=curve[-1] * (1 - stp_pct * LEVERAGE)
-      stp_cnt=stp_cnt+1
-      if stp_cnt_max<stp_cnt:
-              stp_cnt_max=stp_cnt_max
-      
+
+    # ----- stop-loss check (intraday) ---------------------------------------
+    if stp != True and in_pos != 0:
+        r_hi = (entry_p / df['high'].iloc[i] - 1) * in_pos
+        r_lo = (entry_p / df['low'].iloc[i]  - 1) * in_pos
+        if r_hi >= stp_pct or r_lo >= stp_pct:
+            stp = True
+            stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
+            stp_cnt += 1
+            stp_cnt_max = max(stp_cnt_max, stp_cnt)
+
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
-        in_pos  = pos_i
-        entry_p = p_now
-        entry_d = df['date'].iloc[i]
-        stp = False
+        in_pos       = pos_i
+        entry_p      = p_now
+        entry_d      = df['date'].iloc[i]
+        just_entered = True
+        stp          = False
+        curve.append(curve[-1])         # no P&L on entry day
         print(f"ENTRY {in_pos}  ")
-
+        continue                        # skip to next bar
 
     # ----- exit on opposite cross ---------------------------------------------
     if in_pos != 0 and pos_i == -in_pos:
-        ret = (p_now / entry_p - 1) * in_pos * LEVERAGE
-        if stp == True:
-          trades.append((entry_d, df['date'].iloc[i], -stp_pct*LEVERAGE))
+        daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
+        trades.append((entry_d, df['date'].iloc[i],
+                      -stp_pct*LEVERAGE if stp else daily_ret))
+        if not stp and daily_ret >= 0:
+            stp_cnt = 0
         else:
-          trades.append((entry_d, df['date'].iloc[i], ret))
-          if ret >= 0:
-            stp_cnt=0
-          else:
-            stp_cnt=stp_cnt+1
-            if stp_cnt_max<stp_cnt:
-              stp_cnt_max=stp_cnt
-              
+            stp_cnt += 1
+            stp_cnt_max = max(stp_cnt_max, stp_cnt)
+
         in_pos = 0
-        stp = False
+        stp    = False
         print(f"CROSS TRADE {trades[-1]}  ")
 
     # ----- equity update -------------------------------------------------------
-    if stp == True:
-      curve.append(stp_price)
-      days_stp=days_stp+1
-      print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-          f"STOP @ {df['close'].iloc[i]:>10.2f}  "
-          f"CURVE {curve[-1]}")
-      
-    else:
-      if entry_p != p_now:
-        curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
-      else: 
+    if stp:
+        curve.append(stp_price)
+        days_stp += 1
+        print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+              f"STOP @ {df['close'].iloc[i]:>10.2f}  "
+              f"CURVE {curve[-1]}")
+    elif just_entered:                  # first bar after entry – no P&L
         curve.append(curve[-1])
-      print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-          f" {df['close'].iloc[i]:>10.2f}  "
-          f"CURVE {curve[-1]}")
+        print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+              f" {df['close'].iloc[i]:>10.2f}  "
+              f"CURVE {curve[-1]}")
+        just_entered = False
+    else:                               # normal bar
+        curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
+        print(f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
+              f" {df['close'].iloc[i]:>10.2f}  "
+              f"CURVE {curve[-1]}")
+
     time.sleep(0.01)
 
 curve = pd.Series(curve, index=df.index)
@@ -132,7 +138,7 @@ final_macd = curve.iloc[-1]
 final_hold = (df['close'].iloc[-1] / df['close'].iloc[0]) * 10000
 worst      = min(trades, key=lambda x: x[2])
 
-print(f'\n===== MACD (no stop-loss, {LEVERAGE}× lev) =====')
+print(f'\n===== MACD (2.9 % stop, {LEVERAGE}× lev) =====')
 print(f'MACD final:        €{final_macd:,.0f}')
 print(f'Buy & Hold final:  €{final_hold:,.0f}')
 print(f'Worst trade:       {worst[2]*100:.2f}% (exit {worst[1].strftime("%Y-%m-%d")})')
