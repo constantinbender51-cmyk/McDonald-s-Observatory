@@ -39,3 +39,18 @@ class LogisticRegression:
 
     def predict(self, X, threshold=0.5):
         return (self.predict_proba(X) >= threshold).astype(int)
+
+if __name__ == "__main__":
+    from sklearn.datasets import make_classification
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score
+
+    X, y = make_classification(n_samples=1000, n_features=20,
+                               n_informative=2, n_redundant=10,
+                               random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y,
+                                        test_size=0.2, random_state=42)
+
+    model = LogisticRegression(lr=0.3, n_iter=20_000).fit(X_train, y_train)
+    print("Accuracy:", accuracy_score(y_test, model.predict(X_test)))
+    
