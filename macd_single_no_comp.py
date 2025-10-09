@@ -56,7 +56,7 @@ signal_df = pd.DataFrame({
 })
 
 print('\n----- first 10 rows: MACD vs Stoch-RSI position -----')
-print(signal_df.head(30).to_string(index=False))
+print(signal_df.head(40).to_string(index=False))
 
 # =====================  SINGLE RUN (WITH 2.9 % STOP) ==========================
 LEVERAGE = 1
