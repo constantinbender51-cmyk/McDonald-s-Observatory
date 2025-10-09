@@ -84,7 +84,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
             trades.append((entry_d, df['date'].iloc[i],
                 stp_ret if stp else daily_ret))
             stp_ret = 0
-      continue
+            continue
 
         # ----- exit on opposite cross ----------------------------------------
         if in_pos != 0 and pos_i == -in_pos:
