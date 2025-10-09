@@ -89,7 +89,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
         if in_pos != 0 and pos_i == -in_pos:
             daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
             trades.append((entry_d, df['date'].iloc[i],
-                          -stp_pct*LEVERAGE if stp else daily_ret))
+                          0 if stp else daily_ret))
             if not stp and daily_ret >= 0:
                 stp_cnt = 0
             else:
@@ -113,7 +113,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
             curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
         daily_ret = (p_now / p_prev - 1) * in_pos * LEVERAGE
         trades.append((entry_d, df['date'].iloc[i],
-                      -stp_pct*LEVERAGE if stp else daily_ret))
+                      0 if stp else daily_ret))
   
 
     curve = pd.Series(curve, index=df.index)
