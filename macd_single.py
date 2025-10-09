@@ -90,7 +90,7 @@ for i in range(1, len(df)):
           f" EXIT == {exit}")
       
     else:
-      if exit: 
+      if exit == True: 
         curve.append(curve[-1] * (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE))
       else:
         curve.append(curve[-1])
