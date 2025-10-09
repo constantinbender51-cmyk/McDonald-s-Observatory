@@ -74,7 +74,7 @@ for i in range(1, len(df)):
             curve.append(stp_price)
         else: 
             curve.append(curve[-1])     
-        print(f"{pos_i}"
+        print(f"{in_pos}"
           f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f" ENTRY PRICE {entry_p}"
           f" POS {in_pos}"
@@ -104,10 +104,7 @@ for i in range(1, len(df)):
             days_stp += 1
         else:                               # normal bar
             curve.append(curve[-1] * (1 + (p_now/entry_p - 1) * in_pos * LEVERAGE))
-        
-        in_pos = 0
-        stp    = False
-        print(f"{pos_i}"
+        print(f"{in_pos}"
           f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
           f" ENTRY PRICE {entry_p}"
           f" POS {in_pos}"
@@ -117,6 +114,9 @@ for i in range(1, len(df)):
           f" STOP {stp}"
           f" CURVE {curve[-1]}"
           f" CROSSING")
+        in_pos = 0
+        stp    = False
+        
         continue 
     # ----- equity update -------------------------------------------------------
     if stp:
@@ -125,7 +125,7 @@ for i in range(1, len(df)):
     else:                               # normal bar
         curve.append(curve[-1])
 
-    print(f"{pos_i}"
+    print(f"{in_pos}"
        f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
        f" ENTRY PRICE {entry_p}"
        f" POS {in_pos}"
