@@ -149,7 +149,7 @@ for LEVERAGE, stp_pct in product(LEV_GRID, STOP_GRID):
     lose_streak = (trades_ret < 0).astype(int)
     max_lose_streak = lose_streak.groupby(
                           lose_streak.diff().ne(0).cumsum()).sum().max()
-    print(f"{LEVERAGE/50*100}"
+    print(f"{LEVERAGE/5*100}"
               f"%")
     time.sleep(0.01)
 
