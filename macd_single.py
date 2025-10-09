@@ -53,15 +53,15 @@ for i in range(1, len(df)):
             stp_cnt += 1
             stp_cnt_max = max(stp_cnt_max, stp_cnt)
 
-    print(
-       f"{df['date'].iloc[i].strftime('%Y-%m-%d')}  "
-       f" CURVE {curve[-1]}"
+    print(f"{pos_i}"
+       f" {df['date'].iloc[i].strftime('%Y-%m-%d')}  "
        f" ENTRY PRICE {entry_p}"
        f" POS {in_pos}"
        f" HIGH {df['high'].iloc[i]}"
-       f" LOW {df['high'].iloc[i]}"
+       f" LOW {df['low'].iloc[i]}"
        f" CLOSE {df['close'].iloc[i]:>10.2f}  "
-       f" STOP {stp}")
+       f" STOP {stp}"
+       f" CURVE {curve[-1]}")
   
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
