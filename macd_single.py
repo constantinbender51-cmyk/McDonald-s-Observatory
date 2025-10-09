@@ -69,6 +69,7 @@ for i in range(1, len(df)):
             stp_price = curve[-1] * (1 - stp_pct * LEVERAGE)
             stp_cnt += 1
             stp_cnt_max = max(stp_cnt_max, stp_cnt)
+            curve.append(stp_price)
         else: 
             curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))         # no P&L on entry day
         
