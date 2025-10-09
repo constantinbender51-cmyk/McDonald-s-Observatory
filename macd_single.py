@@ -58,7 +58,7 @@ for i in range(1, len(df)):
     # ----- entry logic --------------------------------------------------------
     if in_pos == 0 and pos_i != 0:
         in_pos       = pos_i
-        entry_p      = p_now
+        entry_p      = p_prev
         entry_d      = df['date'].iloc[i]
         just_entered = True
         stp          = False
