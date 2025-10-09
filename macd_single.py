@@ -88,7 +88,7 @@ for i in range(1, len(df)):
 
         in_pos = 0
         stp    = False
-        print(f"CROSS TRADE {trades[-1]}  ")
+        print("CROSS")
 
     # ----- equity update -------------------------------------------------------
     if stp:
@@ -100,7 +100,7 @@ for i in range(1, len(df)):
     else:                               # normal bar
         curve.append(curve[-1] * (1 + (p_now/p_prev - 1) * in_pos * LEVERAGE))
 
-    time.sleep(0.01)
+    time.sleep(0.02)
 
 curve = pd.Series(curve, index=df.index)
 
