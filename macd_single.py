@@ -86,7 +86,7 @@ for i in range(1, len(df)):
     p_now  = df['close'].iloc[i]
     pos_i  = pos_stoch.iloc[i]          # <<<< changed from pos.iloc[i]
     stp_ret= 0
-
+    time.sleep(0.02)
     # ----- stop-loss check (intraday) ---------------------------------------
     if stp is not True and in_pos != 0:
         r_hi = (p_prev / df['high'].iloc[i] - 1) * in_pos
