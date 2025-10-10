@@ -125,16 +125,26 @@ for i in range(50):
     time.sleep(0.1)
 
 # ---------- 8. one-day price-change % and pretty print ----------
+# ---------- 8. one-day price-change % and pretty print ----------
 close = df["close"].values
 # percentage change over the NEXT day (t+1)
 pct_change = (close[split+1:] / close[split:-1] - 1) * 100
 macd_signal = (macd_line - signal_line).values[split:]   # aligned with y_test
 
-capital = 1000.0                                           # start value
-print("\nidx    pred   pctChg%   macd-sig   prev*1+sign(pred)*pctChg")
+capital     = 1000.0   # strategy: trade the *model* prediction sign
+buy_hold    = 1000.0   # benchmark: buy and hold
+macd_real   = 1000.0   # strategy: trade the *real* MACD-distance sign
+
+print("\nidx    pred   pctChg%   macd-sig     model      buy&hold    real-MACD")
 for i in range(len(pred)):
-    ret = np.sign(pred[i]) * pct_change[i] / 100
-    capital *= 1 + ret
+    ret_model = np.sign(pred[i])            * pct_change[i] / 100
+    ret_real  = np.sign(macd_signal[i])     * pct_change[i] / 100
+    ret_bh    = pct_change[i] / 100         # buy-and-hold return
+
+    capital   *= 1 + ret_model
+    buy_hold  *= 1 + ret_bh
+    macd_real *= 1 + ret_real
+
     print(f"{i:3d}  {pred[i]:7.2f}  {pct_change[i]:6.2f}%  "
-          f"{macd_signal[i]:8.2f}     {capital:8.2f}")
+          f"{macd_signal[i]:8.2f}   {capital:8.2f}   {buy_hold:8.2f}   {macd_real:8.2f}")
     time.sleep(0.01)
