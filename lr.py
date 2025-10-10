@@ -72,7 +72,7 @@ y_true = y_test
 
 # 1. regression
 mae   = mean_absolute_error(y_true, pred)
-rmse  = mean_squared_error(y_true, pred, squared=False)
+rmse = np.sqrt(mean_squared_error(y_true, pred))
 r2    = r2_score(y_true, pred)
 mape  = mean_absolute_percentage_error(y_true, pred) * 100
 medae = median_absolute_error(y_true, pred)
