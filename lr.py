@@ -3,6 +3,8 @@ import numpy as np
 from pathlib import Path
 import time
 
+FORECAST_HORIZON = 5          # <-- look-ahead days (change this only)
+
 # ---------- 1. load ----------
 CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
@@ -30,7 +32,7 @@ for i in range(lookback):
     df[sig_cols[i]]   = signal_line.shift(lookback - i)
 
 FEATURES = macd_cols + sig_cols          # 40 features
-df["y"]  = (macd_line - signal_line).shift(-5)   # tomorrow's distance
+df["y"] = (macd_line - signal_line).shift(-FORECAST_HORIZON)   # <-- use var
 df = df.dropna()                         # removes rows with NaN at ends
 # ---------- 4. train/test split ----------
 split = int(len(df) * 0.8)
@@ -130,7 +132,7 @@ true_sign = np.sign(y_test)          # already aligned with pred
 pred_sign = np.sign(pred)
 
 # 3. 5-day price change sign (shifted 5 steps so the forecast is ahead)
-price_chg = test_df["close"].pct_change(5).shift(-5)   # 5-day forward return
+price_chg = test_df["close"].pct_change(FORECAST_HORIZON).shift(-FORECAST_HORIZON)
 price_sign = np.sign(price_chg.dropna())               # drop last 5 NaN
 
 # align lengths (price_sign loses 5 rows at the end)
