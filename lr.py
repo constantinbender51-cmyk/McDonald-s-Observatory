@@ -92,3 +92,6 @@ print(f"Δ R²   : {r2 - old_r2:+.4f}")
 
 print((pred == test_df["yest_close"].values).mean())
 
+test_df["pred"] = pred
+test_df["mid"]  = (test_df.high + test_df.low)/2
+print((np.abs(test_df.pred - test_df.mid) / test_df.mid).describe())
