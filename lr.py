@@ -142,33 +142,40 @@ y_test      = y_test[:len(pct_change)]
 pred        = pred[:len(pct_change)]
 macd_signal = df["macd_signal"].values[split : split + len(pct_change)]
 
-capital   = 1000.0   # strategy: trade the *model* prediction sign
-buy_hold  = 1000.0   # benchmark: buy and hold
-macd_real = 1000.0   # strategy: trade the *real* MACD-distance sign
+capital   = 1000.0
+buy_hold  = 1000.0
+macd_real = 1000.0
 
-pos_model = 0        # current position for model-driven strategy
-pos_real  = 0        # current position for real-MACD strategy
+pos_model = 0
+pos_real  = 0
+
+# keep track of the index of the last flip
+last_model_flip = 0
+last_real_flip  = 0
 
 print("\nidx    pred   pctChg%   macd-sig     model      buy&hold    real-MACD")
 for i in range(len(pred)):
     new_model_sign = int(np.sign(pred[i]))
     new_real_sign  = int(np.sign(macd_signal[i]))
 
-    # --- model strategy: trade only on sign flip ---
-    if new_model_sign != pos_model:
-        pos_model = new_model_sign
-        ret_model = pos_model * pct_change[i] / 100
-        capital  *= 1 + ret_model
+    # ----- model strategy -----
+    if new_model_sign != pos_model:               # flip detected
+        # cumulative return since last flip
+        cum_ret = (np.prod(1 + pos_model * pct_change[last_model_flip:i+1]/100) - 1)
+        capital *= 1 + cum_ret
+        # update tracking variables
+        pos_model       = new_model_sign
+        last_model_flip = i + 1          # next bar to start measuring from
 
-    # --- real-MACD strategy: trade only on sign flip ---
+    # ----- real-MACD strategy -----
     if new_real_sign != pos_real:
-        pos_real = new_real_sign
-        ret_real = pos_real * pct_change[i] / 100
-        macd_real *= 1 + ret_real
+        cum_ret = (np.prod(1 + pos_real * pct_change[last_real_flip:i+1]/100) - 1)
+        macd_real *= 1 + cum_ret
+        pos_real       = new_real_sign
+        last_real_flip = i + 1
 
-    # --- buy & hold ---
-    ret_bh = pct_change[i] / 100
-    buy_hold *= 1 + ret_bh
+    # ----- buy & hold -----
+    buy_hold *= 1 + pct_change[i]/100
 
     print(f"{i:3d}  {pred[i]:7.2f}  {pct_change[i]:6.2f}%  "
           f"{macd_signal[i]:8.2f}   {capital:8.2f}   {buy_hold:8.2f}   {macd_real:8.2f}")
