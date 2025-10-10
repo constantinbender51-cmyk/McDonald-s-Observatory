@@ -113,6 +113,7 @@ for i in range(len(pct1d)):
     buyhold *= 1 + pct1d[i]
     print(f"{df['date'].iloc[first+i].strftime('%Y-%m-%d')}  "
           f"{p5:5.1f}  {p27:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
+    time.sleep(0.01)
 
 if pos != 0:
     gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
