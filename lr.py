@@ -56,7 +56,7 @@ for i in range(lookback):
     df[stoch_cols[i]] = df["stoch_rsi"].shift(lookback - i)
     df[pct_cols[i]]   = df["pct_chg"].shift(lookback - i)
     df[vol_cols[i]]   = df["vol_pct_chg"].shift(lookback - i)
-    df[macd_cols[i]]  = df["macd_sig"].shift(lookback - i)
+    df[macd_cols[i]]  = df["macd_signal"].shift(lookback - i)
 
 FEATURES = stoch_cols + pct_cols + vol_cols + macd_cols   # 80 features
 df = df.dropna()   # drops rows with NaN at both ends
