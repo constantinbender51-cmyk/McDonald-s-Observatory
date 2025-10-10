@@ -1,14 +1,14 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-import time 
+import time
 
 CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 close = df["close"].values
 
 # ---------- 1.  FEATURES + STANDARDISATION  ----------
-lookback = 20
+lookback = 10                                      # << changed
 stoch_cols = [f"stoch_{i}" for i in range(lookback)]
 pct_cols   = [f"pct_{i}"   for i in range(lookback)]
 vol_cols   = [f"vol_{i}"   for i in range(lookback)]
@@ -58,7 +58,7 @@ class LinReg:
         Xb = np.c_[np.ones(X.shape[0]), X]
         return Xb @ self.theta
 
-# ---------- 2.  TRAIN 5-day & 27-day MODELS ----------
+# ---------- 2.  TRAIN 6-day & 10-day MODELS ----------
 def train_model(horizon):
     d = df.copy()
     d["y"] = (d["close"].shift(-horizon) / d["close"] - 1) * 100
@@ -70,42 +70,42 @@ def train_model(horizon):
     pred  = model.predict(X[s:])
     return pred
 
-pred5  = train_model(5)
-pred27 = train_model(27)
+pred6  = train_model(6)    # << changed
+pred10 = train_model(10)   # << changed
 
 # ----------  3.  TRADE  ----------
 first = split
-min_len = min(len(pred5), len(pred27))
+min_len = min(len(pred6), len(pred10))             # << changed
 pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
 
-pred5  = pred5 [:min_len]
-pred27 = pred27[:min_len]
+pred6  = pred6 [:min_len]                          # << changed
+pred10 = pred10[:min_len]                          # << changed
 
 capital = 1000.0
 buyhold = 1000.0
-lev     = 2.0
-stop    = 0.50
+lev     = 3.0                                       # << changed
+stop    = 0.80                                      # << changed
 
 pos     = 0
 entry_i = 0
 
-max_cap = capital          # running high-water mark
-worst_dd = 0.0             # biggest negative change (in percent)
+max_cap = capital
+worst_dd = 0.0
 
-print("date        5d%  27d%  pos  equity   buy&hold")
+print("date        6d%  10d%  pos  equity   buy&hold")
 
 for i in range(len(pct1d)):
-    p5, p27 = pred5[i], pred27[i]
+    p6, p10 = pred6[i], pred10[i]                   # << changed
     new_pos = 0
-    if   p5 > 0 and p27 > 0: new_pos =  1
-    elif p5 < 0 and p27 < 0: new_pos = -1
+    if   p6 > 0 and p10 > 0: new_pos =  1
+    elif p6 < 0 and p10 < 0: new_pos = -1
 
     if pos != 0:
         realised = (close[first+i] / close[first+entry_i] - 1) * 100 * pos
-        if realised <= -stop * abs(pred5[entry_i]):
+        if realised <= -stop * abs(pred6[entry_i]):   # << changed
             new_pos = 0
-        if pos ==  1 and p5 < 0 and p27 < 0: new_pos = 0
-        if pos == -1 and p5 > 0 and p27 > 0: new_pos = 0
+        if pos ==  1 and p6 < 0 and p10 < 0: new_pos = 0
+        if pos == -1 and p6 > 0 and p10 > 0: new_pos = 0
 
     if new_pos != pos:
         if pos != 0:
@@ -125,7 +125,7 @@ for i in range(len(pct1d)):
         worst_dd = dd
 
     print(f"{df['date'].iloc[first+i].strftime('%Y-%m-%d')}  "
-          f"{p5:5.1f}  {p27:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
+          f"{p6:5.1f}  {p10:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
     time.sleep(0.01)
 
 # final close-out
@@ -133,7 +133,7 @@ if pos != 0:
     gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
     capital *= gross
 
-print(f"\nFinal equity (2×) : {capital:8.2f}")
+print(f"\nFinal equity (3×) : {capital:8.2f}")
 print(f"Buy & hold        : {buyhold:8.2f}")
 print(f"Excess            : {capital - buyhold:8.2f}")
-print(f"Worst trade (%)   : {worst_dd:8.2f}")   # <— biggest negative hit
+print(f"Worst trade (%)   : {worst_dd:8.2f}")
