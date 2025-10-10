@@ -130,11 +130,12 @@ for i in range(50):
 close = df["close"].values
 
 # keep only the rows that survived dropna() and belong to the test set
-test_close = test_df["close"].values               # already aligned
+test_close = test_df["close"].values                 # already aligned
 pct_change = (test_close[1:] / test_close[:-1] - 1) * 100
+pct_change = pct_change[:len(pred)]                  # <-- make lengths identical
 
-# MACD-distance on the test block
 macd_signal = (macd_line - signal_line).values[test_df.index]
+macd_signal = macd_signal[:len(pred)]                # same here
 
 capital   = 1000.0
 buy_hold  = 1000.0
