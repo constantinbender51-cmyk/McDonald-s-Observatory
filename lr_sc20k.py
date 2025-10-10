@@ -123,12 +123,13 @@ def run_once(lookback, short_h, long_h, stop_pct, lev):
 
     return capital, buyhold, max_dd
 
-# ---------- 20 000-run grid ----------
-lookbacks = range(5, 61, 5)      # 10 steps
-shorts    = range(1, 20, 2)      # 10 steps
-longs     = range(5, 50, 5)      # 10 steps
-stops     = range(15, 61, 15)    # 4  steps  15 30 45 60
-levs      = np.arange(1, 6, 1)   # 5  steps  1 2 3 4 5
+# ---------- 2 000-run grid ----------
+lookbacks = range(5, 31, 5)      # 5 steps   5 10 15 20 25 30
+shorts    = range(1, 11, 2)      # 5 steps   1 3 5 7 9
+longs     = range(5, 26, 5)      # 5 steps   5 10 15 20 25
+stops     = range(15, 91, 15)    # 3 steps  15 30 45
+levs      = np.arange(1, 5, 1)   # 4 steps   1 2 3 4
+# total = 5*5*5*3*4 = 1 500 combinations
 
 best = []   # keep top 5
 
