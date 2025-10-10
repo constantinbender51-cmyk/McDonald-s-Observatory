@@ -70,6 +70,23 @@ pred = model.predict(X_test)
 # -------# distance between MACD and its signal line
 df["macd_signal"] = macd_line - signal_line
 
+# ---------- Stochastic RSI (14-period) ----------
+def stoch_rsi(close, rsi_period=14, stoch_period=14):
+    delta = close.diff()
+    gain = np.where(delta > 0, delta, 0)
+    loss = np.where(delta < 0, -delta, 0)
+    avg_gain = pd.Series(gain).rolling(window=rsi_period).mean()
+    avg_loss = pd.Series(loss).rolling(window=rsi_period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+
+    stoch_rsi = (rsi - rsi.rolling(window=stoch_period).min()) / \
+                (rsi.rolling(window=stoch_period).max() - rsi.rolling(window=stoch_period).min())
+    return stoch_rsi
+
+df["stoch_rsi"] = stoch_rsi(df["close"])
+
+
 
 from sklearn.metrics import (mean_absolute_error, mean_squared_error, r2_score,
                              mean_absolute_percentage_error, median_absolute_error)
@@ -126,6 +143,11 @@ for i in range(5):
     print(f"{i:5d}  {a:8.2f}  {p:8.2f}  {a-p:8.2f}")
     time.sleep(0.1)
 
+
+# StochRSI strategy: buy < 0.2, sell > 0.8
+df["stoch_signal"] = np.where(df["stoch_rsi"] < 0.2, 1,
+                                np.where(df["stoch_rsi"] > 0.8, -1, 0))
+
 # ---------- 8. one-day price-change % and pretty print ----------
 close = df["close"].values
 
@@ -148,16 +170,22 @@ test_dates = df["date"].iloc[split : split + len(pct_change)].reset_index(drop=T
 capital   = 1000.0
 buy_hold  = 1000.0
 macd_real = 1000.0
+# ----- StochRSI strategy -----
+stoch_real = 1000.0
+pos_stoch  = 0
+last_stoch_flip = 0
+
 
 pos_model = 0
 pos_real  = 0
 last_model_flip = 0
 last_real_flip  = 0
 
-print("\ndate          idx    pred   pctChg%   macd-sig     model      buy&hold    real-MACD")
+print("\ndate          idx    pred   pctChg%   macd-sig     model      buy&hold    real-MACD   stochRSI")
 for i in range(len(pred)):
     new_model_sign = int(np.sign(pred[i]))
     new_real_sign  = int(np.sign(macd_signal[i]))
+    new_stoch_sign = int(np.sign(df["stoch_signal"].iloc[split + i]))
 
     # ----- model strategy -----
     if new_model_sign != pos_model:
@@ -173,11 +201,20 @@ for i in range(len(pred)):
         pos_real       = new_real_sign
         last_real_flip = i + 1
 
+    # ----- StochRSI strategy -----
+    
+    if new_stoch_sign != pos_stoch and new_stoch_sign != 0:
+        cum_ret = (np.prod(1 + pos_stoch * pct_change[last_stoch_flip:i+1]/100) - 1)
+        stoch_real *= 1 + cum_ret
+        pos_stoch       = new_stoch_sign
+        last_stoch_flip = i + 1
+        
+
     # ----- buy & hold -----
     buy_hold *= 1 + pct_change[i]/100
 
     # pretty print with date
-    print(f"{test_dates[i].strftime('%Y-%m-%d')}  {i:3d}  {pred[i]:7.2f}  "
+        print(f"{test_dates[i].strftime('%Y-%m-%d')}  {i:3d}  {pred[i]:7.2f}  "
           f"{pct_change[i]:6.2f}%  {macd_signal[i]:8.2f}   {capital:8.2f}   "
-          f"{buy_hold:8.2f}   {macd_real:8.2f}")
+          f"{buy_hold:8.2f}   {macd_real:8.2f}   {stoch_real:8.2f}")
     time.sleep(0.01)
