@@ -122,7 +122,7 @@ for i in range(50):
     a = y_test[i]
     p = pred[i]
     print(f"{i:5d}  {a:8.2f}  {p:8.2f}  {a-p:8.2f}")
-    time.sleep(0.01)
+    time.sleep(0.1)
 
 # ---------- 8. sign flags and accuracy ----------
 # 1. true macd-signal sign
