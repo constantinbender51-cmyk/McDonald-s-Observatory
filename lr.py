@@ -123,3 +123,18 @@ for i in range(50):
     p = pred[i]
     print(f"{i:5d}  {a:8.2f}  {p:8.2f}  {a-p:8.2f}")
     time.sleep(0.1)
+
+# ---------- 8. one-day price-change % and pretty print ----------
+close = df["close"].values
+# percentage change over the NEXT day (t+1)
+pct_change = (close[split+1:] / close[split:-1] - 1) * 100
+macd_signal = (macd_line - signal_line).values[split:]   # aligned with y_test
+
+capital = 1000.0                                           # start value
+print("\nidx    pred   pctChg%   macd-sig   prev*1+sign(pred)*pctChg")
+for i in range(len(pred)):
+    ret = np.sign(pred[i]) * pct_change[i] / 100
+    capital *= 1 + ret
+    print(f"{i:3d}  {pred[i]:7.2f}  {pct_change[i]:6.2f}%  "
+          f"{macd_signal[i]:8.2f}     {capital:8.2f}")
+    time.sleep(0.01)
