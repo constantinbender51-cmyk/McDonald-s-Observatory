@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 import time
 
-FORECAST_HORIZON = 5          # <-- look-ahead days (change this only)
+FORECAST_HORIZON = 2          # <-- look-ahead days (change this only)
 
 # ---------- 1. load ----------
 CSV_FILE = Path("btc_daily.csv")
