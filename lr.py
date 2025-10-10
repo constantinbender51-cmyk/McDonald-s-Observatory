@@ -134,6 +134,7 @@ df["stoch_signal"] = np.where(df["stoch_rsi"] < 0.2, 1,
                                 np.where(df["stoch_rsi"] > 0.8, -1, 0))
 
 # ---------- 8. one-day price-change % and pretty print ----------
+test_dates = df["date"].iloc[split : split + len(pct_change)].reset_index(drop=True)
 close = df["close"].values
 
 # first and last index of the test window
