@@ -44,17 +44,7 @@ def run_once(lookback, short_h, long_h, stop_pct, lev):
     signal_line = ema(macd_line, 9)
     df["macd_signal"] = macd_line - signal_line
 
-    # fast concat instead of column-by-column
-    shifted = pd.concat(
-        {name: col.shift(lookback - i)
-         for i in range(lookback)
-         for name, col in (("stoch", df["stoch_rsi"]),
-                           ("pct",   df["pct_chg"]),
-                           ("vol",   df["vol_pct_chg"]),
-                           ("macd",  df["macd_signal"]))},
-        axis=1
-    )
-    # ---------- build lag matrix ----------
+        # ---------- lag matrix in one go ----------
     frames = {}
     for i in range(lookback):
         frames[f"stoch_{i}"] = df["stoch_rsi"].shift(lookback - i)
