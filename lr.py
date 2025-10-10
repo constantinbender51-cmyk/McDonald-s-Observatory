@@ -6,11 +6,16 @@ from pathlib import Path
 CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 
-# ----- 1. pick the columns we want -----
-today_hl   = ["high"]           # <- only high, no low
-yest_ohlcv = ["yest_open", "yest_high", "yest_low", "yest_volume"]
+# ----- today’s high & low -----
+today_hl = ["high"]
+for c in today_hl:
+    df[c] = df[c].astype(float)
 
-FEATURES = today_hl + yest_ohlcv   # 1 + 4 = 5 columns
+# ----- yesterday’s OHLCV -----
+yest_ohlcv = ["yest_open", "yest_high", "yest_low", "yest_volume"]
+df[yest_ohlcv] = df[["open", "high", "low", "volume"]].shift(1)
+
+FEATURES = today_hl + yest_ohlcv   # 2 + 4 = 6 columns
 df["y"] = df["close"]              # same-day target
 df.dropna(inplace=True)
 
@@ -78,6 +83,5 @@ old_mae = 604.57          # your 4-feature result from earlier log
 old_r2  = 0.9984
 print(f"Δ MAE  : {old_mae - mae:+.2f}  ({(old_mae - mae)/old_mae * 100:+.1f} %)")
 print(f"Δ R²   : {r2 - old_r2:+.4f}")
-
 
 
