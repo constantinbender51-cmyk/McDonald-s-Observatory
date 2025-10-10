@@ -129,19 +129,6 @@ np.random.shuffle(X_shuf)
 pred_shuf = model.predict(X_shuf)
 shuf_dir  = (np.sign(pred_shuf) == np.sign(y_test)).mean()
 
-print("\n==========  SHUFFLE TEST  ==========")
-print(f"Original dir-acc : {dir_acc:10.1%}")
-print(f"Shuffled dir-acc : {shuf_dir:10.1%}")
-print(f"Difference       : {dir_acc - shuf_dir:10.1%}")
-
-print("index  actual     pred     error")
-for i in range(5):
-    a = y_test[i]
-    p = pred[i]
-    print(f"{i:5d}  {a:8.2f}  {p:8.2f}  {a-p:8.2f}")
-    time.sleep(0.1)
-
-
 # StochRSI strategy: buy < 0.2, sell > 0.8
 df["stoch_signal"] = np.where(df["stoch_rsi"] < 0.2, 1,
                                 np.where(df["stoch_rsi"] > 0.8, -1, 0))
@@ -166,62 +153,6 @@ macd_signal = df["macd_signal"].values[split : split + len(pct_change)]
 stoch_values = df["stoch_rsi"].iloc[split : split + len(pct_change)].reset_index(drop=True)
 stoch_signals = df["stoch_signal"].iloc[split : split + len(pct_change)].reset_index(drop=True)
 
-
-# --- grab the date column for the test window -----------------------------
-test_dates = df["date"].iloc[split : split + len(pct_change)].reset_index(drop=True)
-
-capital   = 1000.0
-buy_hold  = 1000.0
-macd_real = 1000.0
-# ----- StochRSI strategy -----
-stoch_real = 1000.0
-pos_stoch  = 0
-last_stoch_flip = 0
-
-
-pos_model = 0
-pos_real  = 0
-last_model_flip = 0
-last_real_flip  = 0
-
-print("\ndate          idx    pred   pctChg%   macd-sig  stoch-rsi  stoch-sig   model      buy&hold    real-MACD   stochRSI")
-for i in range(len(pred)):
-    new_model_sign = int(np.sign(pred[i]))
-    new_real_sign  = int(np.sign(macd_signal[i]))
-    new_stoch_sign = int(np.sign(df["stoch_signal"].iloc[split + i]))
-
-    # ----- model strategy -----
-    if new_model_sign != pos_model:
-        cum_ret = (np.prod(1 + pos_model * pct_change[last_model_flip:i+1]/100) - 1)
-        capital *= 1 + cum_ret
-        pos_model       = new_model_sign
-        last_model_flip = i + 1
-
-    # ----- real-MACD strategy -----
-    if new_real_sign != pos_real:
-        cum_ret = (np.prod(1 + pos_real * pct_change[last_real_flip:i+1]/100) - 1)
-        macd_real *= 1 + cum_ret
-        pos_real       = new_real_sign
-        last_real_flip = i + 1
-
-    # ----- StochRSI strategy -----
-    
-    if new_stoch_sign != pos_stoch and new_stoch_sign != 0:
-        cum_ret = (np.prod(1 + pos_stoch * pct_change[last_stoch_flip:i+1]/100) - 1)
-        stoch_real *= 1 + cum_ret
-        pos_stoch       = new_stoch_sign
-        last_stoch_flip = i + 1
-        
-
-    # ----- buy & hold -----
-    buy_hold *= 1 + pct_change[i]/100
-
-    # pretty print with date
-    print(f"{test_dates[i].strftime('%Y-%m-%d')}  {i:3d}  {pred[i]:7.2f}  "
-      f"{pct_change[i]:6.2f}%  {macd_signal[i]:8.2f}  "
-      f"{stoch_values[i]:8.3f}  {stoch_signals[i]:8.0f}   "
-      f"{capital:8.2f}   {buy_hold:8.2f}   {macd_real:8.2f}   {stoch_real:8.2f}")
-    time.sleep(0.01)
 
 # ---------- capital curve: long/short on sign of H-day prediction ----------
 capital      = 1000.0
