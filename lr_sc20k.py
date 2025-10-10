@@ -58,7 +58,15 @@ def rolling_minmax(x, window):
         out_max[i] = w.max()
     return out_min, out_max
     
-
+def safe_lstsq(A, b):
+    """return theta s.t. Aθ≈b, or zeros if A is rank-deficient/NaN"""
+    if np.isnan(A).any() or np.isnan(b).any() or A.shape[0] < A.shape[1]:
+        return np.zeros(A.shape[1])
+    try:
+        return np.linalg.lstsq(A, b, rcond=None)[0]
+    except np.linalg.LinAlgError:          # SVD failed
+        return np.zeros(A.shape[1])
+        
 
 
 # ---------- build all series at full length ----------
@@ -148,8 +156,8 @@ def run_once(lb, sh, lo, st, lv):
 
     # linear regression  (Xb = add constant)
     Xb = np.c_[np.ones(split), X[:split]]
-    theta5  = np.linalg.lstsq(Xb, y5[:split],  rcond=None)[0]
-    theta27 = np.linalg.lstsq(Xb, y27[:split], rcond=None)[0]
+    theta5  = safe_lstsq(Xb, y5[:split])
+    theta27 = safe_lstsq(Xb, y27[:split])
 
     Xb_test = np.c_[np.ones(min_len-split), X[split:]]
     pred5  = Xb_test @ theta5
