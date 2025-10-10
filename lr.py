@@ -60,6 +60,10 @@ for a, p in zip(y_test[-10:], pred[-10:]):
 today_c   = test_df["close"].values
 dir_right = np.mean((np.sign(pred - today_c) == np.sign(y_test - today_c)))
 print(f"Direction accuracy: {dir_right:.3f}")
+print(f"raw direction accuracy: {dir_right}")
+print(f"num ties : {np.sum(pred == today_c)}")
+print(f"num right: {np.sum(np.sign(pred - today_c) == np.sign(y_test - today_c))}")
+print(f"num wrong: {np.sum(np.sign(pred - today_c) != np.sign(y_test - today_c))}")
 
 mape = np.mean(np.abs(y_test - pred) / y_test) * 100
 ss_res = np.sum((y_test - pred) ** 2)
