@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import time
 
 # ---------- 1. load ----------
 CSV_FILE = Path("btc_daily.csv")
@@ -113,3 +114,10 @@ print("\n==========  SHUFFLE TEST  ==========")
 print(f"Original dir-acc : {dir_acc:10.1%}")
 print(f"Shuffled dir-acc : {shuf_dir:10.1%}")
 print(f"Difference       : {dir_acc - shuf_dir:10.1%}")
+
+print("index  actual     pred     error")
+for i in range(50):
+    a = y_test[i]
+    p = pred[i]
+    print(f"{i:5d}  {a:8.2f}  {p:8.2f}  {a-p:8.2f}")
+    time.sleep(0.01)
