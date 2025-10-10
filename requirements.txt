@@ -4,3 +4,4 @@ numpy>=1.19
 scikit-learn>=1.0
 pathos
 tqdm
+numba
