@@ -24,8 +24,7 @@ def stoch_rsi(close, rsi_p=14, stoch_p=14):
     rs = avg_gain / (avg_loss + 1e-12)
     rsi = 100 - (100 / (1 + rs))
     # stochastic of rsi
-    min_rsi = roll(rsi, stoch_p, origin='valid')
-    max_rsi = roll(rsi, stoch_p, origin='valid')
+    min_rsi, max_rsi = rolling_minmax(rsi, stoch_p)
     stoch = (rsi[stoch_p-1:] - min_rsi) / (max_rsi - min_rsi + 1e-12)
     # pad to original length
     out = np.empty_like(close, dtype=float)
@@ -40,6 +39,17 @@ def ema(arr, n):
     for i in range(1, len(arr)):
         out[i] = alpha*arr[i] + (1-alpha)*out[i-1]
     return out
+@njit
+def rolling_minmax(x, window):
+    n = len(x)
+    out_min = np.empty(n - window + 1, dtype=x.dtype)
+    out_max = np.empty(n - window + 1, dtype=x.dtype)
+    for i in range(n - window + 1):
+        w = x[i:i + window]
+        out_min[i] = w.min()
+        out_max[i] = w.max()
+    return out_min, out_max
+    
 
 # pre-compute everything
 stoch = stoch_rsi(close_full)
