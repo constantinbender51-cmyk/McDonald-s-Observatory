@@ -1,126 +1,123 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-import time
 
-# ----------------------------------------------------------
-# 9.  TWO-HORIZON SET-UP  (5-day and 27-day)
-# ----------------------------------------------------------
-H_short = 5
-H_long  = 27
+CSV_FILE = Path("btc_daily.csv")
+df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
+close = df["close"].values
 
+# ---------- 1.  FEATURES + STANDARDISATION  ----------
+lookback = 20
+stoch_cols = [f"stoch_{i}" for i in range(lookback)]
+pct_cols   = [f"pct_{i}"   for i in range(lookback)]
+vol_cols   = [f"vol_{i}"   for i in range(lookback)]
+macd_cols  = [f"macd_{i}"  for i in range(lookback)]
+
+def stoch_rsi(close, rsi_period=14, stoch_period=14):
+    delta = pd.Series(close).diff()
+    gain  = np.where(delta > 0, delta, 0)
+    loss  = np.where(delta < 0, -delta, 0)
+    avg_gain = pd.Series(gain).rolling(rsi_period).mean()
+    avg_loss = pd.Series(loss).rolling(rsi_period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    stoch = (rsi - rsi.rolling(stoch_period).min()) / \
+            (rsi.rolling(stoch_period).max() - rsi.rolling(stoch_period).min())
+    return stoch.values
+
+df["stoch_rsi"] = stoch_rsi(df["close"])
+df["pct_chg"]   = df["close"].pct_change() * 100
+df["vol_pct_chg"] = df["volume"].pct_change() * 100
+
+def ema(s, n): return s.ewm(span=n, adjust=False).mean()
+macd_line = ema(df["close"], 12) - ema(df["close"], 26)
+signal_line = ema(macd_line, 9)
+df["macd_signal"] = macd_line - signal_line
+
+for i in range(lookback):
+    df[stoch_cols[i]] = df["stoch_rsi"].shift(lookback - i)
+    df[pct_cols[i]]   = df["pct_chg"].shift(lookback - i)
+    df[vol_cols[i]]   = df["vol_pct_chg"].shift(lookback - i)
+    df[macd_cols[i]]  = df["macd_signal"].shift(lookback - i)
+
+FEATURES = stoch_cols + pct_cols + vol_cols + macd_cols
+df = df.dropna()
+
+split = int(len(df) * 0.8)
+mu, sigma = df[FEATURES].values[:split].mean(axis=0), df[FEATURES].values[:split].std(axis=0)
+
+def zscore(X): return (X - mu) / np.where(sigma == 0, 1, sigma)
+
+class LinReg:
+    def fit(self, X, y):
+        Xb = np.c_[np.ones(X.shape[0]), X]
+        self.theta = np.linalg.lstsq(Xb, y, rcond=None)[0]
+        return self
+    def predict(self, X):
+        Xb = np.c_[np.ones(X.shape[0]), X]
+        return Xb @ self.theta
+
+# ---------- 2.  TRAIN 5-day & 27-day MODELS ----------
 def train_model(horizon):
-    """clone of the LinReg pipeline for any horizon"""
-    df_ = df.copy()
-    df_["y"] = (df_["close"].shift(-horizon) / df_["close"] - 1) * 100
-    df_ = df_.dropna(subset=["y"])          # keep aligned
+    d = df.copy()
+    d["y"] = (d["close"].shift(-horizon) / d["close"] - 1) * 100
+    d = d.dropna(subset=["y"])
+    X = zscore(d[FEATURES].values)
+    y = d["y"].values
+    s = int(len(d) * 0.8)
+    model = LinReg().fit(X[:s], y[:s])
+    pred  = model.predict(X[s:])
+    return pred
 
-    # same 80-feature matrix we already built
-    X_ = zscore_transform(df_[FEATURES].values, mu, sigma)
-    y_ = df_["y"].values
+pred5  = train_model(5)
+pred27 = train_model(27)
 
-    split_ = int(len(df_) * 0.8)
-    X_tr, y_tr = X_[:split_], y_[:split_]
-    X_te, y_te = X_[split_:], y_[split_:]
+# ---------- 3.  TRADE ----------
+first = split
+last  = len(close) - max(5, 27)
+pct1d = (close[first+1:last+1] / close[first:last] - 1)
 
-    m = LinReg().fit(X_tr, y_tr)
-    pred_te = m.predict(X_te)
-    return m, pred_te, df_
+pred5  = pred5 [:len(pct1d)]
+pred27 = pred27[:len(pct1d)]
 
-model5,  pred5,  df5  = train_model(H_short)
-model27, pred27, df27 = train_model(H_long)
+capital = 1000.0
+buyhold = 1000.0
+lev     = 2.0
+stop    = 0.50          # 50 % of |5-day pred|
 
-# ----------------------------------------------------------
-# 10.  TRADE LOGIC
-# ----------------------------------------------------------
-capital      = 1000.0
-buy_hold     = 1000.0
-lev          = 2.0
-stop_pct     = 0.50          # 50 % of |5-day pred|
+pos = 0
+entry_i = 0
+print("date        5d%  27d%  pos  equity   buy&hold")
 
-# --- align everything to the common test window -------------
-first_idx = split
-last_idx  = len(df) - max(H_short, H_long)   # keep room for both targets
-
-# 1-day % changes for the whole out-of-sample period
-pct_1d = (close[first_idx+1 : last_idx+1] /
-          close[first_idx : last_idx] - 1)
-
-# slice forecasts to same window
-pred5  = pred5 [:len(pct_1d)]
-pred27 = pred27[:len(pct_1d)]
-
-position   = 0               # +1 long / -1 short / 0 out
-entry_val  = 0.0             # equity at entry
-entry_i    = 0
-max_dd     = 0.0             # running max dd inside current trade
-high_since_entry = 0.0
-
-print("\ndate       idx  5d%  27d%  pos  equity   buy&hold  note")
-for i in range(len(pct_1d)):
+for i in range(len(pct1d)):
     p5, p27 = pred5[i], pred27[i]
     new_pos = 0
-    note    = ""
-
-    # ----- signal agreement -----
     if   p5 > 0 and p27 > 0: new_pos =  1
     elif p5 < 0 and p27 < 0: new_pos = -1
-    else:                    new_pos =  0
 
-    ret = pct_1d[i] * lev          # 1-day leveraged return
+    if pos != 0:
+        realised = (close[first+i] / close[first+entry_i] - 1) * 100 * pos
+        if realised <= -stop * abs(pred5[entry_i]):
+            new_pos = 0
+        if pos ==  1 and p5 < 0 and p27 < 0: new_pos = 0
+        if pos == -1 and p5 > 0 and p27 > 0: new_pos = 0
 
-    # ----- exit conditions if we are in a trade -----
-    if position != 0:
-        # 1. stop-loss: price has moved against us by >50 % of |5-day pred|
-        stop_thresh = stop_pct * abs(pred5[entry_i])
-        realised_pct = (close[first_idx+i] / close[first_idx+entry_i] - 1) * 100 * position
-        if realised_pct <= -stop_thresh:
-            new_pos, note = 0, "STOP"
-
-        # 2. both forecasts flipped to opposite side
-        if position == 1 and p5 < 0 and p27 < 0:
-            new_pos, note = 0, "FLIP-S"
-        if position == -1 and p5 > 0 and p27 > 0:
-            new_pos, note = 0, "FLIP-L"
-
-        # 3. signals no longer agree
-        if new_pos == 0 and note == "":
-            note = "EXIT"
-
-    # ----- position change -----
-    if new_pos != position:
-        if position != 0:               # close existing trade
-            gross = (1 + (close[first_idx+i] / close[first_idx+entry_i] - 1) * lev * position)
+    if new_pos != pos:
+        if pos != 0:
+            gross = 1 + (close[first+i] / close[first+entry_i] - 1) * lev * pos
             capital *= gross
-            print(f"  --- close trade  dd:{max_dd:5.2%}  multiplier:{gross-1:6.2%}")
-            max_dd = 0.0
-        if new_pos != 0:                # open new trade
-            entry_val  = capital
-            entry_i    = i
-            high_since_entry = capital
+        if new_pos != 0:
+            entry_i = i
+        pos = new_pos
 
-    # ----- update running max draw-down inside trade -----
-    if new_pos != 0:
-        high_since_entry = max(high_since_entry, capital * (1 + (close[first_idx+i] / close[first_idx+entry_i] - 1) * lev * new_pos))
-        dd = (high_since_entry - capital * (1 + (close[first_idx+i] / close[first_idx+entry_i] - 1) * lev * new_pos)) / high_since_entry
-        max_dd = max(max_dd, dd)
+    buyhold *= 1 + pct1d[i]
+    print(f"{df['date'].iloc[first+i].strftime('%Y-%m-%d')}  "
+          f"{p5:5.1f}  {p27:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
 
-    position = new_pos
-
-    # ----- buy & hold -----
-    buy_hold *= 1 + pct_1d[i]
-
-    # ----- pretty print -----
-    print(f"{df['date'].iloc[first_idx+i].strftime('%Y-%m-%d')}  "
-          f"{i:3d}  {p5:5.1f}  {p27:5.1f}  "
-          f"{position:3d}  {capital:8.2f}  {buy_hold:8.2f}  {note}")
-
-# ----- final open position -----
-if position != 0:
-    gross = (1 + (close[first_idx+len(pct_1d)-1] / close[first_idx+entry_i] - 1) * lev * position)
+if pos != 0:
+    gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
     capital *= gross
-    print(f"  --- final close  dd:{max_dd:5.2%}  multiplier:{gross-1:6.2%}")
 
-print(f"\nFinal equity (2× lev) : {capital:10.2f}")
-print(f"Buy & hold             : {buy_hold:10.2f}")
-print(f"Excess return          : {capital - buy_hold:10.2f}")
+print(f"\nFinal equity (2×) : {capital:8.2f}")
+print(f"Buy & hold        : {buyhold:8.2f}")
+print(f"Excess            : {capital - buyhold:8.2f}")
