@@ -120,7 +120,7 @@ print(f"Shuffled dir-acc : {shuf_dir:10.1%}")
 print(f"Difference       : {dir_acc - shuf_dir:10.1%}")
 
 print("index  actual     pred     error")
-for i in range(50):
+for i in range(5):
     a = y_test[i]
     p = pred[i]
     print(f"{i:5d}  {a:8.2f}  {p:8.2f}  {a-p:8.2f}")
