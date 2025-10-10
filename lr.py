@@ -81,4 +81,11 @@ print(f"R²          : {r2:.4f}")
 print(f"Midpoint MAE: {mid_mae:.2f}")
 print(f"Range-norm  : {mae / (test_df['high'] - test_df['low']).mean():.2f}")
 
+# ---------- 8. compare with 4-feature run ----------
+old_mae = 604.57          # your 4-feature result from earlier log
+old_r2  = 0.9984
+print(f"Δ MAE  : {old_mae - mae:+.2f}  ({(old_mae - mae)/old_mae * 100:+.1f} %)")
+print(f"Δ R²   : {r2 - old_r2:+.4f}")
+
+
 
