@@ -9,17 +9,6 @@ FORECAST_HORIZON = 40          # <-- look-ahead days (change this only)
 CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 
-# ---------- 2. create yesterday-only predictors ----------
-# ---------- 1. MACD (12,26,9) ----------
-def ema(s, n):
-    return s.ewm(span=n, adjust=False).mean()
-
-fast = 12
-slow = 26
-sig  = 9
-
-macd_line = ema(df["close"], fast) - ema(df["close"], slow)
-signal_line = ema(macd_line, sig)
 
 # ---------- 2. create forward-horizon target ----------
 close   = df["close"].values
