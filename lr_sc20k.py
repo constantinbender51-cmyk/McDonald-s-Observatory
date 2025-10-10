@@ -152,6 +152,9 @@ def run_once(lb, sh, lo, st, lv):
     final, dd = backtest(close_seg, pred5, pred27, lv, st, 0.0015)
     buyhold = 1000.0 * close_seg[-1] / close_seg[0]
     return final, (lb,sh,lo,st,lv), buyhold, dd
+def _run_once_row(row):
+    return run_once(*row)          # expand lb, sh, lo, st, lv
+    
 
 # ------------------------------------------------------------------
 # 4.  grid + multiprocessing
@@ -168,7 +171,7 @@ param_grid = np.vstack([p.ravel() for p in param_grid]).T.astype(int)
 
 best = []
 with mp.Pool(processes=mp.cpu_count()) as pool:
-    for res in tqdm(pool.imap_unordered(run_once, param_grid, chunksize=100),
+    for res in tqdm(pool.imap_unordered(_run_once_row, param_grid, chunksize=100),
                     total=len(param_grid)):
         if res is None: continue
         best.append(res)
