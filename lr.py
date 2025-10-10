@@ -57,3 +57,8 @@ print(f"Test RMSE: {rmse:.2f}")
 print("\nLast 10 predicted vs actual:")
 for a, p in zip(y_test[-10:], pred[-10:]):
     print(f"actual {a:8.2f}  pred {p:8.2f}")
+
+today_c   = test_df["close"].values
+dir_right = np.mean((np.sign(pred - today_c) == np.sign(y_test - today_c)))
+print(f"Direction accuracy: {dir_right:.3f}")
+
