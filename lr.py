@@ -258,4 +258,4 @@ if position != 0:
 
 print(f"\nFinal capital (strategy) : {capital:8.2f}")
 print(f"Final buy & hold         : {buy_hold:8.2f}")
-print(f"Excess return            : {capital - buy_hold:8.2f}")import pandas as pd
+print(f"Excess return            : {capital - buy_hold:8.2f}")
