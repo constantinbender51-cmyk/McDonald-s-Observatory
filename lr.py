@@ -6,17 +6,12 @@ from pathlib import Path
 CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 
-# ----- today’s high & low -----
-today_hl = ["high"]
-for c in today_hl:
-    df[c] = df[c].astype(float)
-
-# ----- yesterday’s OHLCV -----
+# ---------- 2. create yesterday-only predictors ----------
 yest_ohlcv = ["yest_open", "yest_high", "yest_low", "yest_volume"]
 df[yest_ohlcv] = df[["open", "high", "low", "volume"]].shift(1)
 
-FEATURES = today_hl + yest_ohlcv   # 2 + 4 = 6 columns
-df["y"] = df["close"]              # same-day target
+FEATURES = yest_ohlcv          # 4 columns, all from yesterday
+df["y"] = df["close"]          # target is still today’s close
 df.dropna(inplace=True)
 
 # ---------- 4. train/test split ----------
