@@ -121,3 +121,28 @@ for i in range(50):
     p = pred[i]
     print(f"{i:5d}  {a:8.2f}  {p:8.2f}  {a-p:8.2f}")
     time.sleep(0.01)
+
+# ---------- 8. sign flags and accuracy ----------
+# 1. true macd-signal sign
+true_sign = np.sign(y_test)          # already aligned with pred
+
+# 2. predicted macd-signal sign
+pred_sign = np.sign(pred)
+
+# 3. 5-day price change sign (shifted 5 steps so the forecast is ahead)
+price_chg = test_df["close"].pct_change(5).shift(-5)   # 5-day forward return
+price_sign = np.sign(price_chg.dropna())               # drop last 5 NaN
+
+# align lengths (price_sign loses 5 rows at the end)
+min_len = min(len(true_sign), len(pred_sign), len(price_sign))
+true_sign  = true_sign[:min_len]
+pred_sign  = pred_sign[:min_len]
+price_sign = price_sign[:min_len]
+
+# accuracies
+acc_true  = (true_sign  == pred_sign).mean()
+acc_price = (price_sign == pred_sign).mean()
+
+print("\n==========  SIGN ACCURACIES  ==========")
+print(f"MACD-signal sign accuracy : {acc_true:10.1%}")
+print(f"Price-change sign accuracy: {acc_price:10.1%}")
