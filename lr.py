@@ -11,15 +11,17 @@ today = ["open", "high", "low", "volume"]
 for c in today:
     df[c] = df[c].astype(float)
 
-# ----- yesterday’s OHLCV -----
-yest = ["yest_open", "yest_high", "yest_low", "yest_volume"]
-df[yest] = df[today].shift(1)          # lag = 1
-FEATURES = today + yest                # 8 columns
+# ----- lag 1 … 7 days -----
+LAGS = 7
+feat_cols = []
+for lag in range(1, LAGS + 1):
+    for col in today:
+        name = f"{col}_lag{lag}"
+        df[name] = df[col].shift(lag)
+        feat_cols.append(name)
 
-# ----- target (same-day close) -----
-df["y"] = df["close"]
-
-# drop rows with NaNs introduced by lag
+FEATURES = today + feat_cols          # 4 + 28 = 32 columns
+df["y"]    = df["close"]              # same-day target
 df.dropna(inplace=True)
 
 # ---------- 4. train/test split ----------
