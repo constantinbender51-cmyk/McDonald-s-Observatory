@@ -223,68 +223,39 @@ for i in range(len(pred)):
       f"{capital:8.2f}   {buy_hold:8.2f}   {macd_real:8.2f}   {stoch_real:8.2f}")
     time.sleep(0.01)
 
-# ---------- H-day hold with 3 % stop AND 8 % entry filter ----------
-capital   = 1000.0
-buy_hold  = 1000.0
-position  = 0          # +1 long, -1 short, 0 cash
-entry_p   = None       # entry price
-entry_idx = None       # index when position was opened
-stop_pct  = 0.03
-cost      = 0.0010     # 10 bps one-way
-H         = FORECAST_HORIZON
+# ---------- capital curve: long/short on sign of H-day prediction ----------
+capital      = 1000.0
+buy_hold     = 1000.0
+position     = 0          # +1 long, -1 short
+entry_i      = 0          # index when position was opened
 
-print("\ndate       idx  pred%  next%  pos  entry_p  days_left  strategy   buy&hold")
+print("\ndate       idx  pred_%  next_%  pos  strategy   buy&hold")
 for i in range(len(pred)):
-    curr_p   = close[split + i]
-    next_ret = pct_change[i] / 100
-    pred_mag = abs(pred[i])
+    new_pos = int(np.sign(pred[i]))          # +1 or -1
+    next_ret = pct_change[i] / 100           # today→tomorrow return (1-day!)
 
-    # ---------- 1. stop-loss check ----------
-    if position != 0 and entry_p is not None:
-        pnl = (curr_p / entry_p - 1) * position
-        if pnl <= -stop_pct:
-            capital *= (1 - cost)   # exit
-            position   = 0
-            entry_p    = None
-            entry_idx  = None
+    # ---------- flip position ----------
+    if new_pos != position:
+        # close previous position: compound the return since entry
+        chunk = slice(entry_i, i+1)
+        gross = (1 + position * pct_change[chunk]/100).prod()
+        capital *= gross
+        position  = new_pos
+        entry_i   = i+1
 
-    # ---------- 2. natural H-day exit ----------
-    if position != 0 and entry_idx is not None:
-        if i - entry_idx >= H - 1:          # H-1 because we entered on entry_idx
-            capital *= (1 - cost)
-            position   = 0
-            entry_p    = None
-            entry_idx  = None
-
-    # ---------- 3. new entry only if |pred| ≥ 8 % and sign flip ----------
-    new_sign = int(np.sign(pred[i])) if pred_mag >= 8.0 else 0
-    if new_sign != 0 and new_sign != position:
-        # exit old position first (if any)
-        if position != 0:
-            capital *= (1 - cost)
-        # enter new
-        position  = new_sign
-        entry_p   = curr_p
-        entry_idx = i
-        capital  *= (1 - cost)
-
-    # ---------- 4. apply daily return ----------
-    if position != 0:
-        capital *= 1 + position * next_ret
+    # ---------- buy & hold ----------
     buy_hold *= 1 + next_ret
 
     # ---------- pretty print ----------
-    days_left = "-" if entry_idx is None else max(0, H - 1 - (i - entry_idx))
     print(f"{test_dates[i].strftime('%Y-%m-%d')}  "
-          f"{i:3d}  {pred[i]:6.2f} {next_ret*100:5.2f}  "
-          f"{position:3d}  {entry_p if entry_p else '-':7.2f} "
-          f"{days_left!s:>9s}  {capital:8.2f}  {buy_hold:8.2f}")
+          f"{i:3d}  {pred[i]:6.2f}  {next_ret*100:5.2f}  "
+          f"{position:3d}  {capital:8.2f}  {buy_hold:8.2f}")
     time.sleep(0.01)
-
-# ---------- final exit if still open ----------
+# ---------- close final open position ----------
 if position != 0:
-    capital *= (1 - cost)
+    gross = (1 + position * pct_change[entry_i:]/100).prod()
+    capital *= gross
 
-print(f"\nFinal strategy : {capital:8.2f}")
-print(f"Final buy&hold : {buy_hold:8.2f}")
-print(f"Net excess     : {capital - buy_hold:8.2f}")
+print(f"\nFinal capital (strategy) : {capital:8.2f}")
+print(f"Final buy & hold         : {buy_hold:8.2f}")
+print(f"Excess return            : {capital - buy_hold:8.2f}")
