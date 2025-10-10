@@ -7,13 +7,13 @@ CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 
 # ---------- 2. target ----------
-df["y"] = df["close"].shift(-1)            # tomorrow's close
+df["y"] = df["close"]           # tomorrow's close
 
 # ---------- 3. features ----------
 feat = ["open", "high", "low", "volume"]
 for c in feat:
     df[c] = df[c].astype(float)
-df[feat] = df[feat].shift(1)               # no peeking
+# df[feat] = df[feat].shift(1)               # no peeking
 df.dropna(inplace=True)
 
 # ---------- 4. train/test split ----------
