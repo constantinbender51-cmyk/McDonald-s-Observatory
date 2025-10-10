@@ -27,6 +27,9 @@ split = int(len(df) * 0.8)
 train_df = df.iloc[:split]
 test_df  = df.iloc[split:]
 
+y_train = train_df["y"].values          #  <--  was missing
+y_test  = test_df["y"].values           #  <--  was missing
+
 # ---------- 5. standardise (from scratch) ----------
 def zscore_fit(X):
     return X.mean(axis=0), X.std(axis=0, ddof=0)
