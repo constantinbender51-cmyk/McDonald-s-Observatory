@@ -7,18 +7,30 @@ CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 
 # ---------- 2. create yesterday-only predictors ----------
-# ---------- 1. target is now TOMORROW’S close ----------
-df["y"] = df["close"].shift(-1)          # ← tomorrow
+# ---------- 1. MACD (12,26,9) ----------
+def ema(s, n):
+    return s.ewm(span=n, adjust=False).mean()
 
-# ---------- 2. features are ONLY yesterday’s bar ----------
-yest_ohlcv = ["yest_open", "yest_high", "yest_low", "yest_close", "yest_volume"]
-df[yest_ohlcv] = df[["open", "high", "low", "close", "volume"]].shift(1)
+fast = 12
+slow = 26
+sig  = 9
 
-FEATURES = yest_ohlcv                    # 5 columns
-df = df.dropna()                         # drops first and last row
+macd_line = ema(df["close"], fast) - ema(df["close"], slow)
+signal_line = ema(macd_line, sig)
 
-df.dropna(inplace=True)
+# ---------- 2. build 20-day look-back ----------
+lookback = 20
+macd_cols  = [f"macd_{i}"  for i in range(lookback)]
+sig_cols   = [f"sig_{i}"   for i in range(lookback)]
 
+# shift so that row t contains macd[t-19]...macd[t]  (most recent last)
+for i in range(lookback):
+    df[macd_cols[i]]  = macd_line.shift(lookback - i)
+    df[sig_cols[i]]   = signal_line.shift(lookback - i)
+
+FEATURES = macd_cols + sig_cols          # 40 features
+df["y"]  = (macd_line - signal_line).shift(-1)   # tomorrow's distance
+df = df.dropna()                         # removes rows with NaN at ends
 # ---------- 4. train/test split ----------
 split = int(len(df) * 0.8)
 train_df = df.iloc[:split]
