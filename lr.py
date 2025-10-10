@@ -7,10 +7,18 @@ CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 
 # ---------- 2. create yesterday-only predictors ----------
+# ---------- 1. create the columns ----------
+today_hl   = ["high", "low"]
 yest_ohlcv = ["yest_open", "yest_high", "yest_low", "yest_close", "yest_volume"]
+
+# ---- today’s high/low (already in the file, just ensure float) ----
+df[today_hl] = df[today_hl].astype(float)
+
+# ---- yesterday’s OHLCV ----
 df[yest_ohlcv] = df[["open", "high", "low", "close", "volume"]].shift(1)
 
-FEATURES = yest_ohlcv          # 5 columns, all from yesterday
+# ---------- 2. build feature list ----------
+FEATURES = today_hl + yest_ohlcv   # 7 columns
 df["y"] = df["close"]          # target is still today’s close
 df.dropna(inplace=True)
 
