@@ -130,26 +130,30 @@ def run_once(lookback, short_h, long_h, stop_pct, lev):
 
     return capital, buyhold, max_dd
 
-# ---------- GRID ----------
-lookbacks = range(5, 105, 5)
-shorts    = range(1, 21)
-longs     = range(5, 101)
-stops     = range(10, 205, 5)
-levs      = np.arange(1, 5.5, 0.5)
+# ---------- SANE GRID ----------
+lookbacks = range(10, 55, 10)      # 10 20 30 40 50
+shorts    = range(2, 11, 2)        # 2 4 6 8 10
+longs     = range(10, 51, 10)      # 10 20 30 40 50
+stops     = range(20, 81, 20)      # 20 40 60 80
+levs      = np.arange(1, 3.5, 0.5) # 1.0 1.5 2.0 2.5 3.0
 
 total = len(lookbacks)*len(shorts)*len(longs)*len(stops)*len(levs)
 best = []   # keep 5 best (final_equity, params, buyhold, max_dd)
 
-for lb in tqdm(lookbacks, desc="lookback"):
+pbar = tqdm(total=total, desc="scanning")
+for lb in lookbacks:
     for sh in shorts:
         for lo in longs:
-            if sh >= lo:              # meaningless
+            if sh >= lo:           # short must be < long
+                pbar.update(1)
                 continue
             for st in stops:
                 for lv in levs:
                     fe, bh, dd = run_once(lb, sh, lo, st, lv)
                     best.append((fe, (lb, sh, lo, st, lv), bh, dd))
                     best = sorted(best, key=lambda x: x[0], reverse=True)[:5]
+                    pbar.update(1)
+pbar.close()
 
 # ---------- FINAL SUMMARY ----------
 print("\nTop-5 parameter sets (highest final equity):")
@@ -157,3 +161,4 @@ print("lookback | short | long | stop% | lev || final_eq | buy&hold | max_dd%")
 for fe, p, bh, dd in best:
     lb, sh, lo, st, lv = p
     print(f"{lb:7d}  | {sh:4d}  | {lo:3d} | {st:4d} | {lv:4.1f} || {fe:8.2f} | {bh:8.2f} | {dd*100:7.2f}")
+    
