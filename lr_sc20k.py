@@ -1,204 +1,151 @@
 #!/usr/bin/env python3
-import os
-# MUST be set before importing numpy
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-
-
-import numpy as np
+# scan20k.py  – 20 000 runs, top-5 table only
 import pandas as pd
-from numba import njit, prange
+import numpy as np
 from pathlib import Path
 from tqdm import tqdm
-import multiprocessing as mp
 
 CSV_FILE = Path("btc_daily.csv")
-df_full  = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
+df_full = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 close_full = df_full["close"].values
-volume_full = df_full["volume"].values
 
-# ------------------------------------------------------------------
-# 1.  feature engineering  –  ALL same length as close_full
-# ------------------------------------------------------------------
-def stoch_rsi(close, rsi_p=14, stoch_p=14):
-    delta = np.diff(close, prepend=close[0])
-    gain  = np.where(delta > 0, delta, 0.0)
-    loss  = np.where(delta < 0, -delta, 0.0)
-    roll  = lambda x, w: np.convolve(x, np.ones(w)/w, mode='valid')
-    avg_gain = roll(gain, rsi_p)
-    avg_loss = roll(loss, rsi_p)
-    rs  = avg_gain / (avg_loss + 1e-12)
+# ---------- helpers ----------
+def stoch_rsi(close, rsi_period=14, stoch_period=14):
+    delta = pd.Series(close).diff()
+    gain  = np.where(delta > 0, delta, 0)
+    loss  = np.where(delta < 0, -delta, 0)
+    avg_gain = pd.Series(gain).rolling(rsi_period).mean()
+    avg_loss = pd.Series(loss).rolling(rsi_period).mean()
+    rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
+    stoch = (rsi - rsi.rolling(stoch_period).min()) / \
+            (rsi.rolling(stoch_period).max() - rsi.rolling(stoch_period).min())
+    return stoch.values
 
-    min_rsi, max_rsi = rolling_minmax(rsi, stoch_p)      # helper defined earlier
-    stoch = (rsi[stoch_p-1:] - min_rsi) / (max_rsi - min_rsi + 1e-12)
+def ema(s, n): return s.ewm(span=n, adjust=False).mean()
 
-    # pad to original length
-    out = np.full_like(close, np.nan, dtype=float)
-    out[rsi_p + stoch_p - 2:] = stoch
-    return out
+class LinReg:
+    def fit(self, X, y):
+        Xb = np.c_[np.ones(X.shape[0]), X]
+        self.theta = np.linalg.lstsq(Xb, y, rcond=None)[0]
+        return self
+    def predict(self, X):
+        Xb = np.c_[np.ones(X.shape[0]), X]
+        return Xb @ self.theta
+# ------------------------------
 
-def ema(arr, n):
-    alpha = 2/(n+1)
-    out = np.empty_like(arr, dtype=float)
-    out[0] = arr[0]
-    for i in range(1, len(arr)):
-        out[i] = alpha*arr[i] + (1-alpha)*out[i-1]
-    return out
-@njit
-def rolling_minmax(x, window):
-    n = len(x)
-    out_min = np.empty(n - window + 1, dtype=x.dtype)
-    out_max = np.empty(n - window + 1, dtype=x.dtype)
-    for i in range(n - window + 1):
-        w = x[i:i + window]
-        out_min[i] = w.min()
-        out_max[i] = w.max()
-    return out_min, out_max
-    
-def safe_lstsq(A, b):
-    """return theta s.t. Aθ≈b, or zeros if A is rank-deficient/NaN"""
-    if np.isnan(A).any() or np.isnan(b).any() or A.shape[0] < A.shape[1]:
-        return np.zeros(A.shape[1])
-    try:
-        return np.linalg.lstsq(A, b, rcond=None)[0]
-    except np.linalg.LinAlgError:          # SVD failed
-        return np.zeros(A.shape[1])
-        
+def run_once(lookback, short_h, long_h, stop_pct, lev):
+    # 1. features
+    df = df_full.copy()
+    df["stoch_rsi"] = stoch_rsi(df["close"])
+    df["pct_chg"]   = df["close"].pct_change() * 100
+    df["vol_pct_chg"] = df["volume"].pct_change() * 100
+    macd_line = ema(df["close"], 12) - ema(df["close"], 26)
+    signal_line = ema(macd_line, 9)
+    df["macd_signal"] = macd_line - signal_line
 
+        # ---------- lag matrix in one go ----------
+    frames = {}
+    for i in range(lookback):
+        frames[f"stoch_{i}"] = df["stoch_rsi"].shift(lookback - i)
+        frames[f"pct_{i}"]   = df["pct_chg"].shift(lookback - i)
+        frames[f"vol_{i}"]   = df["vol_pct_chg"].shift(lookback - i)
+        frames[f"macd_{i}"]  = df["macd_signal"].shift(lookback - i)
+    shifted = pd.DataFrame(frames, index=df.index)
+    df = pd.concat([df, shifted], axis=1)
 
-# ---------- build all series at full length ----------
-stoch  = stoch_rsi(close_full, 14, 14)
-pct    = np.empty_like(close_full)
-pct[1:] = (close_full[1:]/close_full[:-1] - 1)*100
-pct[0]  = 0.0
-volpct = np.empty_like(close_full)
-volpct[1:] = (volume_full[1:]/volume_full[:-1] - 1)*100
-volpct[0]  = 0.0
-macd_line = ema(close_full,12) - ema(close_full,26)
-macd_sig  = macd_line - ema(macd_line,9)
+    FEATURES = [f"{n}_{i}" for n in ["stoch", "pct", "vol", "macd"] for i in range(lookback)]
+    df = df.dropna()
+    split = int(len(df) * 0.8)
+    mu, sigma = df[FEATURES].values[:split].mean(axis=0), df[FEATURES].values[:split].std(axis=0)
+    def zscore(X): return (X - mu) / np.where(sigma == 0, 1, sigma)
 
-# ---------- fill the lag tensor ----------
-MAX_LB = 60
-N = len(close_full)
-lags = np.full((N, 4, MAX_LB), np.nan, dtype=np.float32)
+    # 2. train
+    def train_model(horizon):
+        d = df.copy()
+        d["y"] = (d["close"].shift(-horizon) / d["close"] - 1) * 100
+        d = d.dropna(subset=["y"])
+        X = zscore(d[FEATURES].values)
+        y = d["y"].values
+        s = int(len(d) * 0.8)
+        model = LinReg().fit(X[:s], y[:s])
+        return model.predict(X[s:])
 
-for lag in range(1, MAX_LB+1):
-    lags[lag:, 0, lag-1] = stoch[:-lag]   # stoch
-    lags[lag:, 1, lag-1] = pct[:-lag]     # pct
-    lags[lag:, 2, lag-1] = volpct[:-lag]  # vol
-    lags[lag:, 3, lag-1] = macd_sig[:-lag] # macd
+    pred5  = train_model(short_h)
+    pred27 = train_model(long_h)
 
+    # 3. trade
+    first = split
+    min_len = min(len(pred5), len(pred27))
+    pct1d = (close_full[first+1 : first+min_len+1] / close_full[first : first+min_len] - 1)
+    pred5, pred27 = pred5[:min_len], pred27[:min_len]
 
-# ------------------------------------------------------------------
-# 2.  jit-compiled back-test  –  ONE parameter vector
-# ------------------------------------------------------------------
-@njit(fastmath=True, nogil=True)
-def backtest(close, pred5, pred27, lev, stop_pct, cost):
-    capital = 1000.0
-    pos, entry_i = 0, 0
+    capital, buyhold = 1000.0, 1000.0
     stop = stop_pct / 100.0
-    equity = [capital]
-    for i in range(len(close)-1):
+    pos, entry_i = 0, 0
+    equity_curve = [capital]
+
+    for i in range(len(pct1d)):
         p5, p27 = pred5[i], pred27[i]
         new_pos = 0
-        if p5 > 0 and p27 > 0:   new_pos =  1
+        if   p5 > 0 and p27 > 0: new_pos =  1
         elif p5 < 0 and p27 < 0: new_pos = -1
 
         if pos != 0:
-            realised = (close[i] / close[entry_i] - 1)*100*pos
-            if realised <= -stop*abs(pred5[entry_i]):
+            realised = (close_full[first+i] / close_full[first+entry_i] - 1) * 100 * pos
+            if realised <= -stop * abs(pred5[entry_i]):
                 new_pos = 0
-            if pos==1  and p5<0 and p27<0: new_pos=0
-            if pos==-1 and p5>0 and p27>0: new_pos=0
+            if pos ==  1 and p5 < 0 and p27 < 0: new_pos = 0
+            if pos == -1 and p5 > 0 and p27 > 0: new_pos = 0
 
         if new_pos != pos:
-            if pos != 0:
-                gross = 1 + (close[i]/close[entry_i] - 1)*lev*pos
-                capital *= gross*(1 - cost)
+            if pos != 0:           # exit
+                gross = 1 + (close_full[first+i] / close_full[first+entry_i] - 1) * lev * pos
+                capital *= gross
+                capital *= (1 - 0.0015)        # <- round-trip cost
             if new_pos != 0:
                 entry_i = i
             pos = new_pos
-        equity.append(capital)
+
+        buyhold *= 1 + pct1d[i]
+        equity_curve.append(capital)
 
     if pos != 0:
-        gross = 1 + (close[-1]/close[entry_i] - 1)*lev*pos
-        capital *= gross*(1 - cost)
-        equity[-1] = capital
+        gross = 1 + (close_full[first+len(pct1d)-1] / close_full[first+entry_i] - 1) * lev * pos
+        capital *= gross
+        capital *= (1 - 0.0015)
 
-    eq = np.array(equity)
-    running_max = np.maximum.accumulate(eq)
-    max_dd = ((eq - running_max)/(running_max + 1e-12)).min()
-    return capital, max_dd
+    # max drawdown
+    equity_curve = np.array(equity_curve)
+    running_max = np.maximum.accumulate(equity_curve)
+    drawdown = (equity_curve - running_max) / running_max
+    max_dd = drawdown.min()
 
-# ------------------------------------------------------------------
-# 3.  single parameter vector  –  wrapper
-# ------------------------------------------------------------------
-def run_once(lb, sh, lo, st, lv):
-    if sh >= lo:
-        return None
-    # slice lags
-    X = lags[MAX_LB:, :, :lb].reshape(-1, 4*lb)  # (T, 4*lb)
-    y5  = (close_full[MAX_LB+sh:]/close_full[MAX_LB:-sh] - 1)*100
-    y27 = (close_full[MAX_LB+lo:]/close_full[MAX_LB:-lo] - 1)*100
+    return capital, buyhold, max_dd
 
-    # align lengths
-    min_len = min(len(X), len(y5), len(y27))
-    X, y5, y27 = X[:min_len], y5[:min_len], y27[:min_len]
-    split = int(0.8*min_len)
+# ---------- 20 000-run grid ----------
+lookbacks = range(5, 61, 5)      # 10 steps
+shorts    = range(1, 20, 2)      # 10 steps
+longs     = range(5, 50, 5)      # 10 steps
+stops     = range(15, 61, 15)    # 4  steps  15 30 45 60
+levs      = np.arange(1, 6, 1)   # 5  steps  1 2 3 4 5
 
-    # z-score on train
-    mu = X[:split].mean(axis=0)
-    sg = X[:split].std(axis=0) + 1e-12
-    X = (X - mu) / sg
+best = []   # keep top 5
 
-    # linear regression  (Xb = add constant)
-    Xb = np.c_[np.ones(split), X[:split]]
-    theta5  = safe_lstsq(Xb, y5[:split])
-    theta27 = safe_lstsq(Xb, y27[:split])
+total = len(lookbacks)*len(shorts)*len(longs)*len(stops)*len(levs)
+for lb in tqdm(lookbacks, desc="lb"):
+    for sh in shorts:
+        for lo in longs:
+            if sh >= lo: continue
+            for st in stops:
+                for lv in levs:
+                    fe, bh, dd = run_once(lb, sh, lo, st, lv)
+                    best.append((fe, (lb, sh, lo, st, lv), bh, dd))
+                    best = sorted(best, key=lambda x: x[0], reverse=True)[:5]
 
-    Xb_test = np.c_[np.ones(min_len-split), X[split:]]
-    pred5  = Xb_test @ theta5
-    pred27 = Xb_test @ theta27
-
-    # back-test
-    close_seg = close_full[MAX_LB+split : MAX_LB+min_len]
-    final, dd = backtest(close_seg, pred5, pred27, lv, st, 0.0015)
-    buyhold = 1000.0 * close_seg[-1] / close_seg[0]
-    return final, (lb,sh,lo,st,lv), buyhold, dd
-def _run_once_row(row):
-    return run_once(*row)          # expand lb, sh, lo, st, lv
-    
-
-# ------------------------------------------------------------------
-# 4.  grid + multiprocessing
-# ------------------------------------------------------------------
-lookbacks = range(5, 61, 5)
-shorts    = range(1, 20, 2)
-longs     = range(5, 50, 5)
-stops     = range(15, 61, 15)
-levs      = np.arange(1, 6, 1)
-
-param_grid = list(np.array(t) for t in
-                  np.meshgrid(lookbacks, shorts, longs, stops, levs))
-param_grid = np.vstack([p.ravel() for p in param_grid]).T.astype(int)
-
-best = []
-with mp.Pool(processes=mp.cpu_count()) as pool:
-    for res in tqdm(pool.imap_unordered(_run_once_row, param_grid, chunksize=100),
-                    total=len(param_grid)):
-        if res is None: continue
-        best.append(res)
-        best = sorted(best, key=lambda x: x[0], reverse=True)[:5]
-
-# ------------------------------------------------------------------
-# 5.  pretty print
-# ------------------------------------------------------------------
+# ---------- final table ----------
 print("\nTop-5 (final equity):")
 print("lb | sh | lo | stop | lev || final_eq | buy&hold | max_dd%")
 for fe, p, bh, dd in best:
-    lb,sh,lo,st,lv = p
-    print(f"{lb:2d} | {sh:2d} | {lo:2d} | {st:4d} | {lv:3.1f} || "
-          f"{fe:8.2f} | {bh:8.2f} | {dd*100:7.2f}")
+    lb, sh, lo, st, lv = p
+    print(f"{lb:2d} | {sh:2d} | {lo:2d} | {st:4d} | {lv:3.1f} || {fe:8.2f} | {bh:8.2f} | {dd*100:7.2f}")
