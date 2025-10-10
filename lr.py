@@ -67,7 +67,9 @@ model = LinReg().fit(X_train, y_train)
 pred = model.predict(X_test)
 
 # ---------- 7. metrics (from scratch) ----------
-# ---------- metrics feast ----------
+# -------# distance between MACD and its signal line
+df["macd_signal"] = macd_line - signal_line
+
 
 from sklearn.metrics import (mean_absolute_error, mean_squared_error, r2_score,
                              mean_absolute_percentage_error, median_absolute_error)
