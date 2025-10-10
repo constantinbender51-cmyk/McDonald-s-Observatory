@@ -14,8 +14,10 @@ df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 close   = df["close"].values
 volume  = df["volume"].values
 
-# forward HORIZON-day percentage change
-df["y"] = (close.shift(-FORECAST_HORIZON) / close - 1) * 100
+# ---------- 2. create forward-horizon target ----------
+# keep it as a Series so we can shift
+close_series = df["close"]
+df["y"] = (close_series.shift(-FORECAST_HORIZON) / close_series - 1) * 100
 
 # ---------- 3. compute raw series that we need ----------
 # 3a. StochRSI (14,14)
