@@ -75,11 +75,11 @@ pred27 = train_model(27)
 
 # ---------- 3.  TRADE ----------
 first = split
-last  = len(close) - max(5, 27)
-pct1d = (close[first+1:last+1] / close[first:last] - 1)
+min_len = min(len(pred5), len(pred27))   # <-- key line
+pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
 
-pred5  = pred5 [:len(pct1d)]
-pred27 = pred27[:len(pct1d)]
+pred5  = pred5 [:min_len]
+pred27 = pred27[:min_len]
 
 capital = 1000.0
 buyhold = 1000.0
