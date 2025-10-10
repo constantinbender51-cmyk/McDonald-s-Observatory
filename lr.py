@@ -142,30 +142,29 @@ y_test      = y_test[:len(pct_change)]
 pred        = pred[:len(pct_change)]
 macd_signal = df["macd_signal"].values[split : split + len(pct_change)]
 
+# --- grab the date column for the test window -----------------------------
+test_dates = df["date"].iloc[split : split + len(pct_change)].reset_index(drop=True)
+
 capital   = 1000.0
 buy_hold  = 1000.0
 macd_real = 1000.0
 
 pos_model = 0
 pos_real  = 0
-
-# keep track of the index of the last flip
 last_model_flip = 0
 last_real_flip  = 0
 
-print("\nidx    pred   pctChg%   macd-sig     model      buy&hold    real-MACD")
+print("\ndate          idx    pred   pctChg%   macd-sig     model      buy&hold    real-MACD")
 for i in range(len(pred)):
     new_model_sign = int(np.sign(pred[i]))
     new_real_sign  = int(np.sign(macd_signal[i]))
 
     # ----- model strategy -----
-    if new_model_sign != pos_model:               # flip detected
-        # cumulative return since last flip
+    if new_model_sign != pos_model:
         cum_ret = (np.prod(1 + pos_model * pct_change[last_model_flip:i+1]/100) - 1)
         capital *= 1 + cum_ret
-        # update tracking variables
         pos_model       = new_model_sign
-        last_model_flip = i + 1          # next bar to start measuring from
+        last_model_flip = i + 1
 
     # ----- real-MACD strategy -----
     if new_real_sign != pos_real:
@@ -177,6 +176,8 @@ for i in range(len(pred)):
     # ----- buy & hold -----
     buy_hold *= 1 + pct_change[i]/100
 
-    print(f"{i:3d}  {pred[i]:7.2f}  {pct_change[i]:6.2f}%  "
-          f"{macd_signal[i]:8.2f}   {capital:8.2f}   {buy_hold:8.2f}   {macd_real:8.2f}")
+    # pretty print with date
+    print(f"{test_dates[i].strftime('%Y-%m-%d')}  {i:3d}  {pred[i]:7.2f}  "
+          f"{pct_change[i]:6.2f}%  {macd_signal[i]:8.2f}   {capital:8.2f}   "
+          f"{buy_hold:8.2f}   {macd_real:8.2f}")
     time.sleep(0.01)
