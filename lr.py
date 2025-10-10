@@ -30,7 +30,7 @@ for i in range(lookback):
     df[sig_cols[i]]   = signal_line.shift(lookback - i)
 
 FEATURES = macd_cols + sig_cols          # 40 features
-df["y"]  = (macd_line - signal_line).shift(-5)   # tomorrow's distance
+df["y"]  = (macd_line - signal_line).shift(-1)   # tomorrow's distance
 df = df.dropna()                         # removes rows with NaN at ends
 # ---------- 4. train/test split ----------
 split = int(len(df) * 0.8)
