@@ -65,6 +65,19 @@ pred = model.predict(X_test)
 
 # ---------- 7. metrics (from scratch) ----------
 # ---------- metrics feast ----------
+
+# ---------- leak litmus: shuffle X_test rows, keep y_test ----------
+np.random.seed(42)                                    # reproducible
+X_shuf = X_test.copy()
+np.random.shuffle(X_shuf)                             # scramble features only
+pred_shuf = model.predict(X_shuf)                     # predict on garbage
+shuf_dir  = (np.sign(pred_shuf) == np.sign(y_test)).mean()
+
+print("\n==========  SHUFFLE TEST  ==========")
+print(f"Original dir-acc : {dir_acc:10.1%}")
+print(f"Shuffled dir-acc : {shuf_dir:10.1%}")
+print(f"Difference       : {dir_acc - shuf_dir:10.1%}")
+
 from sklearn.metrics import (mean_absolute_error, mean_squared_error, r2_score,
                              mean_absolute_percentage_error, median_absolute_error)
 
