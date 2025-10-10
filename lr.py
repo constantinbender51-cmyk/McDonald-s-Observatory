@@ -125,11 +125,21 @@ for i in range(50):
     time.sleep(0.1)
 
 # ---------- 8. one-day price-change % and pretty print ----------
-# ---------- 8. one-day price-change % and pretty print ----------
 close = df["close"].values
-# percentage change over the NEXT day (t+1)
-pct_change = (close[split+1:] / close[split:-1] - 1) * 100
-macd_signal = (macd_line - signal_line).values[split:]   # aligned with y_test
+
+# first index of the test set
+first_test_idx = split
+# last index whose *next* close is available
+last_test_idx  = len(close) - 1 - FORECAST_HORIZON
+
+# next-day returns for every day in the test window
+pct_change = (close[first_test_idx+1 : last_test_idx+1] /
+              close[first_test_idx : last_test_idx] - 1) * 100
+
+# align the other series to the same window
+y_test      = y_test[:len(pct_change)]
+pred        = pred[:len(pct_change)]
+macd_signal = macd_signal[:len(pct_change)]
 
 capital     = 1000.0   # strategy: trade the *model* prediction sign
 buy_hold    = 1000.0   # benchmark: buy and hold
