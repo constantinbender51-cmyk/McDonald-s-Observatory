@@ -6,12 +6,12 @@ from pathlib import Path
 CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 
-# ----- today’s O-H-L -----
-today = ["open", "high", "low"]
+# ----- today’s H-L -----
+today = ["high", "low"]
 for c in today:
     df[c] = df[c].astype(float)
 
-FEATURES = today          # 3 columns
+FEATURES = today          # 2 columns
 df["y"]    = df["close"]  # same-day target
 df.dropna(inplace=True)
 
