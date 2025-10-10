@@ -62,3 +62,16 @@ today_c   = test_df["close"].values
 dir_right = np.mean((np.sign(pred - today_c) == np.sign(y_test - today_c)))
 print(f"Direction accuracy: {dir_right:.3f}")
 
+mape = np.mean(np.abs(y_test - pred) / y_test) * 100
+ss_res = np.sum((y_test - pred) ** 2)
+ss_tot = np.sum((y_test - y_test.mean()) ** 2)
+r2 = 1 - ss_res / ss_tot
+mid = (test_df["high"] + test_df["low"]) / 2
+mid_mae = np.mean(np.abs(y_test - mid))
+
+print(f"MAPE        : {mape:.2f} %")
+print(f"R²          : {r2:.4f}")
+print(f"Midpoint MAE: {mid_mae:.2f}")
+print(f"Range-norm  : {mae / (test_df['high'] - test_df['low']).mean():.2f}")
+
+
