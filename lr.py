@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import time 
 
 CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
