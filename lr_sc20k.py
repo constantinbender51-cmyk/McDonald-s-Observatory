@@ -12,7 +12,7 @@ close_full = df_full["close"].values
 volume_full = df_full["volume"].values
 
 # ------------------------------------------------------------------
-# 1.  feature engineering  –  ONCE
+# 1.  feature engineering  –  ALL same length as close_full
 # ------------------------------------------------------------------
 def stoch_rsi(close, rsi_p=14, stoch_p=14):
     delta = np.diff(close, prepend=close[0])
@@ -21,15 +21,15 @@ def stoch_rsi(close, rsi_p=14, stoch_p=14):
     roll  = lambda x, w: np.convolve(x, np.ones(w)/w, mode='valid')
     avg_gain = roll(gain, rsi_p)
     avg_loss = roll(loss, rsi_p)
-    rs = avg_gain / (avg_loss + 1e-12)
+    rs  = avg_gain / (avg_loss + 1e-12)
     rsi = 100 - (100 / (1 + rs))
-    # stochastic of rsi
-    min_rsi, max_rsi = rolling_minmax(rsi, stoch_p)
+
+    min_rsi, max_rsi = rolling_minmax(rsi, stoch_p)      # helper defined earlier
     stoch = (rsi[stoch_p-1:] - min_rsi) / (max_rsi - min_rsi + 1e-12)
+
     # pad to original length
-    out = np.empty_like(close, dtype=float)
-    out[:rsi_p+stoch_p-2] = np.nan
-    out[rsi_p+stoch_p-2:] = stoch
+    out = np.full_like(close, np.nan, dtype=float)
+    out[rsi_p + stoch_p - 2:] = stoch
     return out
 
 def ema(arr, n):
@@ -51,27 +51,30 @@ def rolling_minmax(x, window):
     return out_min, out_max
     
 
-# pre-compute everything
-stoch = stoch_rsi(close_full)
-pct   = np.empty_like(close_full)
+
+
+# ---------- build all series at full length ----------
+stoch  = stoch_rsi(close_full, 14, 14)
+pct    = np.empty_like(close_full)
 pct[1:] = (close_full[1:]/close_full[:-1] - 1)*100
 pct[0]  = 0.0
-volpct= np.empty_like(close_full)
+volpct = np.empty_like(close_full)
 volpct[1:] = (volume_full[1:]/volume_full[:-1] - 1)*100
 volpct[0]  = 0.0
 macd_line = ema(close_full,12) - ema(close_full,26)
 macd_sig  = macd_line - ema(macd_line,9)
 
+# ---------- fill the lag tensor ----------
 MAX_LB = 60
 N = len(close_full)
-
-# build 4D tensor (T, 4, MAX_LB)  –  we will slice inside the loop
 lags = np.full((N, 4, MAX_LB), np.nan, dtype=np.float32)
-for i in range(MAX_LB):
-    lags[i+1:, 0, i] = stoch[MAX_LB-1-i : -i-1]   # stoch
-    lags[i+1:, 1, i] = pct[MAX_LB-1-i : -i-1]     # pct
-    lags[i+1:, 2, i] = volpct[MAX_LB-1-i: -i-1]   # vol
-    lags[i+1:, 3, i] = macd_sig[MAX_LB-1-i:-i-1]  # macd
+
+for lag in range(1, MAX_LB+1):
+    lags[lag:, 0, lag-1] = stoch[:-lag]   # stoch
+    lags[lag:, 1, lag-1] = pct[:-lag]     # pct
+    lags[lag:, 2, lag-1] = volpct[:-lag]  # vol
+    lags[lag:, 3, lag-1] = macd_sig[:-lag] # macd
+
 
 # ------------------------------------------------------------------
 # 2.  jit-compiled back-test  –  ONE parameter vector
