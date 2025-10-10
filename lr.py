@@ -57,14 +57,12 @@ print("\nLast 10 predicted vs actual:")
 for a, p in zip(y_test[-10:], pred[-10:]):
     print(f"actual {a:8.2f}  pred {p:8.2f}")
 
-today_c   = test_df["close"].values
-dir_right = np.mean((np.sign(pred - today_c) == np.sign(y_test - today_c)))
-print(f"Direction accuracy: {dir_right:.3f}")
-print(f"raw direction accuracy: {dir_right}")
-print(f"num ties : {np.sum(pred == today_c)}")
-print(f"num right: {np.sum(np.sign(pred - today_c) == np.sign(y_test - today_c))}")
-print(f"num wrong: {np.sum(np.sign(pred - today_c) != np.sign(y_test - today_c))}")
-print((pred - test_df.yest_close).mean())
+today_c   = test_df["close"].shift(1).dropna().values   # yesterday’s close
+pred_dir  = np.sign(pred - today_c)
+true_dir  = np.sign(y_test - today_c)
+acc       = (pred_dir == true_dir).mean()
+print(f"Direction accuracy: {acc:.3f}")
+print(f"Right: {(pred_dir == true_dir).sum()}, Wrong: {(pred_dir != true_dir).sum()}")
 
 mape = np.mean(np.abs(y_test - pred) / y_test) * 100
 ss_res = np.sum((y_test - pred) ** 2)
