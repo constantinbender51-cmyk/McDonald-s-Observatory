@@ -7,13 +7,10 @@ CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 
 # ---------- 2. create yesterday-only predictors ----------
-df["yest_ret_o"] = (df["yest_open"]  / df["yest_close"] - 1)
-df["yest_ret_h"] = (df["yest_high"]  / df["yest_close"] - 1)
-df["yest_ret_l"] = (df["yest_low"]   / df["yest_close"] - 1)
-df["yest_ret_v"] = df["yest_volume"].pct_change()
+yest_ohlcv = ["yest_open", "yest_high", "yest_low", "yest_close", "yest_volume"]
+df[yest_ohlcv] = df[["open", "high", "low", "close", "volume"]].shift(1)
 
-FEATURES = ["yest_ret_o", "yest_ret_h", "yest_ret_l", "yest_ret_v"]
-
+FEATURES = yest_ohlcv          # 5 columns, all from yesterday
 df["y"] = df["close"]          # target is still today’s close
 df.dropna(inplace=True)
 
@@ -39,12 +36,12 @@ X_test  = zscore_transform(test_df[FEATURES].values,  mu, sigma)
 # ---------- 6. linear regression from scratch ----------
 class LinReg:
     def fit(self, X, y):
-        self.theta = np.linalg.lstsq(X, y, rcond=None)[0]
+        Xb = np.c_[np.ones(X.shape[0]), X]          # bias column
+        self.theta = np.linalg.lstsq(Xb, y, rcond=None)[0]
         return self
     def predict(self, X):
-        return X @ self.theta
-
-model = LinReg().fit(X_train, y_train)
+        Xb = np.c_[np.ones(X.shape[0]), X]
+        return Xb @ self.theta
 
 model = LinReg().fit(X_train, y_train)
 pred = model.predict(X_test)
@@ -88,5 +85,4 @@ print(f"Δ MAE  : {old_mae - mae:+.2f}  ({(old_mae - mae)/old_mae * 100:+.1f} %)
 print(f"Δ R²   : {r2 - old_r2:+.4f}")
 
 print((pred == test_df["yest_close"].values).mean())
-
 
