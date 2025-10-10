@@ -73,9 +73,9 @@ def train_model(horizon):
 pred5  = train_model(5)
 pred27 = train_model(27)
 
-# ---------- 3.  TRADE ----------
+# ----------  3.  TRADE  ----------
 first = split
-min_len = min(len(pred5), len(pred27))   # <-- key line
+min_len = min(len(pred5), len(pred27))
 pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
 
 pred5  = pred5 [:min_len]
@@ -84,10 +84,14 @@ pred27 = pred27[:min_len]
 capital = 1000.0
 buyhold = 1000.0
 lev     = 2.0
-stop    = 0.50          # 50 % of |5-day pred|
+stop    = 0.50
 
-pos = 0
+pos     = 0
 entry_i = 0
+
+max_cap = capital          # running high-water mark
+worst_dd = 0.0             # biggest negative change (in percent)
+
 print("date        5d%  27d%  pos  equity   buy&hold")
 
 for i in range(len(pct1d)):
@@ -112,23 +116,24 @@ for i in range(len(pct1d)):
         pos = new_pos
 
     buyhold *= 1 + pct1d[i]
+
+    # --- track worst single-day equity drop ---
+    if capital > max_cap:
+        max_cap = capital
+    dd = (capital - max_cap) / max_cap * 100
+    if dd < worst_dd:
+        worst_dd = dd
+
     print(f"{df['date'].iloc[first+i].strftime('%Y-%m-%d')}  "
           f"{p5:5.1f}  {p27:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
     time.sleep(0.01)
 
+# final close-out
 if pos != 0:
     gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
     capital *= gross
 
-# ----------  already existing final prints ----------
 print(f"\nFinal equity (2×) : {capital:8.2f}")
 print(f"Buy & hold        : {buyhold:8.2f}")
 print(f"Excess            : {capital - buyhold:8.2f}")
-
-# ----------  NEW: worst trade ----------
-worst_trade = min(trade_pnl_list) if (trade_pnl_list := [
-    (close[first+i] / close[first+entry_i] - 1) * lev * pos
-    for i in range(len(pct1d))
-    if new_pos != pos and pos != 0      # only days we actually closed
-]) else 0.0
-print(f"Worst trade (%)   : {worst_trade * 100:8.2f}")
+print(f"Worst trade (%)   : {worst_dd:8.2f}")   # <— biggest negative hit
