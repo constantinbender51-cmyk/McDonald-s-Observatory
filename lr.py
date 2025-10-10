@@ -222,3 +222,41 @@ for i in range(len(pred)):
       f"{stoch_values[i]:8.3f}  {stoch_signals[i]:8.0f}   "
       f"{capital:8.2f}   {buy_hold:8.2f}   {macd_real:8.2f}   {stoch_real:8.2f}")
     time.sleep(0.01)
+
+# ---------- capital curve: long/short on sign of H-day prediction ----------
+capital      = 1000.0
+buy_hold     = 1000.0
+position     = 0          # +1 long, -1 short
+entry_i      = 0          # index when position was opened
+
+print("\ndate       idx  pred_%  next_%  pos  strategy   buy&hold")
+for i in range(len(pred)):
+    new_pos = int(np.sign(pred[i]))          # +1 or -1
+    next_ret = pct_change[i] / 100           # today→tomorrow return (1-day!)
+
+    # ---------- flip position ----------
+    if new_pos != position:
+        # close previous position: compound the return since entry
+        chunk = slice(entry_i, i+1)
+        gross = (1 + position * pct_change[chunk]/100).prod()
+        capital *= gross
+        position  = new_pos
+        entry_i   = i+1
+
+    # ---------- buy & hold ----------
+    buy_hold *= 1 + next_ret
+
+    # ---------- pretty print ----------
+    print(f"{test_dates[i].strftime('%Y-%m-%d')}  "
+          f"{i:3d}  {pred[i]:6.2f}  {next_ret*100:5.2f}  "
+          f"{position:3d}  {capital:8.2f}  {buy_hold:8.2f}")
+    time.sleep(0.01)
+# ---------- close final open position ----------
+if position != 0:
+    gross = (1 + position * pct_change[entry_i:]/100).prod()
+    capital *= gross
+
+print(f"\nFinal capital (strategy) : {capital:8.2f}")
+print(f"Final buy & hold         : {buy_hold:8.2f}")
+print(f"Excess return            : {capital - buy_hold:8.2f}")
+
