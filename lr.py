@@ -268,6 +268,7 @@ for i in range(len(pred)):
           f"{i:3d}  {pred[i]:6.2f} {next_ret*100:5.2f}  "
           f"{position:3d}  {entry_p if entry_p else '-':7.2f} {stop_p:7s}  "
           f"{capital:8.2f}  {buy_hold:8.2f}")
+    time.sleep(0.01)
 
 # ---------- final exit if still open ----------
 if position != 0:
