@@ -64,6 +64,7 @@ print(f"raw direction accuracy: {dir_right}")
 print(f"num ties : {np.sum(pred == today_c)}")
 print(f"num right: {np.sum(np.sign(pred - today_c) == np.sign(y_test - today_c))}")
 print(f"num wrong: {np.sum(np.sign(pred - today_c) != np.sign(y_test - today_c))}")
+print((pred - test_df.yest_close).mean())
 
 mape = np.mean(np.abs(y_test - pred) / y_test) * 100
 ss_res = np.sum((y_test - pred) ** 2)
