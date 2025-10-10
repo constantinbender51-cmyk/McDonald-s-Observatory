@@ -79,4 +79,6 @@ old_r2  = 0.9984
 print(f"Δ MAE  : {old_mae - mae:+.2f}  ({(old_mae - mae)/old_mae * 100:+.1f} %)")
 print(f"Δ R²   : {r2 - old_r2:+.4f}")
 
+print((pred == test_df["yest_close"].values).mean())
+
 
