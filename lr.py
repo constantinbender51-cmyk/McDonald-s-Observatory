@@ -11,8 +11,8 @@ today = ["open", "high", "low", "volume"]
 for c in today:
     df[c] = df[c].astype(float)
 
-# ----- lag 1 … 7 days -----
-LAGS = 7
+# ----- lag 1 … 3 days -----
+LAGS = 3
 feat_cols = []
 for lag in range(1, LAGS + 1):
     for col in today:
@@ -20,7 +20,7 @@ for lag in range(1, LAGS + 1):
         df[name] = df[col].shift(lag)
         feat_cols.append(name)
 
-FEATURES = today + feat_cols          # 4 + 28 = 32 columns
+FEATURES = today + feat_cols          # 4 + 12 = 16 columns
 df["y"]    = df["close"]              # same-day target
 df.dropna(inplace=True)
 
