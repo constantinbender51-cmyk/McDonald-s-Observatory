@@ -164,6 +164,11 @@ y_test      = y_test[:len(pct_change)]
 pred        = pred[:len(pct_change)]
 macd_signal = df["macd_signal"].values[split : split + len(pct_change)]
 
+# --- align StochRSI to the same window ---
+stoch_values = df["stoch_rsi"].iloc[split : split + len(pct_change)].reset_index(drop=True)
+stoch_signals = df["stoch_signal"].iloc[split : split + len(pct_change)].reset_index(drop=True)
+
+
 # --- grab the date column for the test window -----------------------------
 test_dates = df["date"].iloc[split : split + len(pct_change)].reset_index(drop=True)
 
@@ -181,7 +186,7 @@ pos_real  = 0
 last_model_flip = 0
 last_real_flip  = 0
 
-print("\ndate          idx    pred   pctChg%   macd-sig     model      buy&hold    real-MACD   stochRSI")
+print("\ndate          idx    pred   pctChg%   macd-sig  stoch-rsi  stoch-sig   model      buy&hold    real-MACD   stochRSI")
 for i in range(len(pred)):
     new_model_sign = int(np.sign(pred[i]))
     new_real_sign  = int(np.sign(macd_signal[i]))
@@ -215,6 +220,7 @@ for i in range(len(pred)):
 
     # pretty print with date
     print(f"{test_dates[i].strftime('%Y-%m-%d')}  {i:3d}  {pred[i]:7.2f}  "
-          f"{pct_change[i]:6.2f}%  {macd_signal[i]:8.2f}   {capital:8.2f}   "
-          f"{buy_hold:8.2f}   {macd_real:8.2f}   {stoch_real:8.2f}")
+      f"{pct_change[i]:6.2f}%  {macd_signal[i]:8.2f}  "
+      f"{stoch_values[i]:8.3f}  {stoch_signals[i]:8.0f}   "
+      f"{capital:8.2f}   {buy_hold:8.2f}   {macd_real:8.2f}   {stoch_real:8.2f}")
     time.sleep(0.01)
