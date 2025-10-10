@@ -34,11 +34,9 @@ def zscore_fit(X):
 def zscore_transform(X, mu, sigma):
     return (X - mu) / np.where(sigma == 0, 1, sigma)
 
-mu, sigma = zscore_fit(train_df[feat].values)
-X_train = zscore_transform(train_df[feat].values, mu, sigma)
-y_train = train_df["y"].values
-X_test  = zscore_transform(test_df[feat].values, mu, sigma)
-y_test  = test_df["y"].values
+mu, sigma = zscore_fit(train_df[FEATURES].values)
+X_train = zscore_transform(train_df[FEATURES].values, mu, sigma)
+X_test  = zscore_transform(test_df[FEATURES].values,  mu, sigma)
 
 # ---------- 6. linear regression from scratch ----------
 class LinReg:
