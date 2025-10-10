@@ -127,7 +127,6 @@ for i in range(50):
     time.sleep(0.1)
 
 # ---------- 8. one-day price-change % and pretty print ----------
-# ---------- 8. one-day price-change % and pretty print ----------
 close = df["close"].values
 
 # first and last index of the test window
@@ -143,19 +142,33 @@ y_test      = y_test[:len(pct_change)]
 pred        = pred[:len(pct_change)]
 macd_signal = df["macd_signal"].values[split : split + len(pct_change)]
 
-capital     = 1000.0   # strategy: trade the *model* prediction sign
-buy_hold    = 1000.0   # benchmark: buy and hold
-macd_real   = 1000.0   # strategy: trade the *real* MACD-distance sign
+capital   = 1000.0   # strategy: trade the *model* prediction sign
+buy_hold  = 1000.0   # benchmark: buy and hold
+macd_real = 1000.0   # strategy: trade the *real* MACD-distance sign
+
+pos_model = 0        # current position for model-driven strategy
+pos_real  = 0        # current position for real-MACD strategy
 
 print("\nidx    pred   pctChg%   macd-sig     model      buy&hold    real-MACD")
 for i in range(len(pred)):
-    ret_model = np.sign(pred[i])            * pct_change[i] / 100
-    ret_real  = np.sign(macd_signal[i])     * pct_change[i] / 100
-    ret_bh    = pct_change[i] / 100         # buy-and-hold return
+    new_model_sign = int(np.sign(pred[i]))
+    new_real_sign  = int(np.sign(macd_signal[i]))
 
-    capital   *= 1 + ret_model
-    buy_hold  *= 1 + ret_bh
-    macd_real *= 1 + ret_real
+    # --- model strategy: trade only on sign flip ---
+    if new_model_sign != pos_model:
+        pos_model = new_model_sign
+        ret_model = pos_model * pct_change[i] / 100
+        capital  *= 1 + ret_model
+
+    # --- real-MACD strategy: trade only on sign flip ---
+    if new_real_sign != pos_real:
+        pos_real = new_real_sign
+        ret_real = pos_real * pct_change[i] / 100
+        macd_real *= 1 + ret_real
+
+    # --- buy & hold ---
+    ret_bh = pct_change[i] / 100
+    buy_hold *= 1 + ret_bh
 
     print(f"{i:3d}  {pred[i]:7.2f}  {pct_change[i]:6.2f}%  "
           f"{macd_signal[i]:8.2f}   {capital:8.2f}   {buy_hold:8.2f}   {macd_real:8.2f}")
