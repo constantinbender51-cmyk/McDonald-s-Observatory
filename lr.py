@@ -120,6 +120,15 @@ if pos != 0:
     gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
     capital *= gross
 
+# ----------  already existing final prints ----------
 print(f"\nFinal equity (2×) : {capital:8.2f}")
 print(f"Buy & hold        : {buyhold:8.2f}")
 print(f"Excess            : {capital - buyhold:8.2f}")
+
+# ----------  NEW: worst trade ----------
+worst_trade = min(trade_pnl_list) if (trade_pnl_list := [
+    (close[first+i] / close[first+entry_i] - 1) * lev * pos
+    for i in range(len(pct1d))
+    if new_pos != pos and pos != 0      # only days we actually closed
+]) else 0.0
+print(f"Worst trade (%)   : {worst_trade * 100:8.2f}")
