@@ -146,3 +146,22 @@ acc_price = (price_sign == pred_sign).mean()
 print("\n==========  SIGN ACCURACIES  ==========")
 print(f"MACD-signal sign accuracy : {acc_true:10.1%}")
 print(f"Price-change sign accuracy: {acc_price:10.1%}")
+
+# ---------- 9. equity curve: start = 100 ----------
+start_capital = 100.0
+curve = [start_capital]
+
+for i in range(1, len(price_sign)):
+    if pred_sign[i] == price_sign[i]:          # same sign → win the move
+        pnl = abs(price_chg.iloc[i])
+    else:                                      # opposite sign → lose the move
+        pnl = -abs(price_chg.iloc[i])
+    curve.append(curve[-1] * (1 + pnl))
+
+final_value = curve[-1]
+total_ret   = (final_value / start_capital - 1) * 100
+
+print("\n==========  SIMPLE PnL TRACK  ==========")
+print(f"Starting capital : {start_capital:8.2f}")
+print(f"Final value      : {final_value:8.2f}")
+print(f"Total return     : {total_ret:8.2f} %")
