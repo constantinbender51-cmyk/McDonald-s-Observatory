@@ -6,13 +6,17 @@ from pathlib import Path
 CSV_FILE = Path("btc_daily.csv")
 df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
 
-# ----- today’s H-L -----
-today = ["high", "low"]
-for c in today:
+# ----- today’s high & low -----
+today_hl = ["high", "low"]
+for c in today_hl:
     df[c] = df[c].astype(float)
 
-FEATURES = today          # 2 columns
-df["y"]    = df["close"]  # same-day target
+# ----- yesterday’s OHLCV -----
+yest_ohlcv = ["yest_open", "yest_high", "yest_low", "yest_volume"]
+df[yest_ohlcv] = df[["open", "high", "low", "volume"]].shift(1)
+
+FEATURES = today_hl + yest_ohlcv   # 2 + 4 = 6 columns
+df["y"] = df["close"]              # same-day target
 df.dropna(inplace=True)
 
 # ---------- 4. train/test split ----------
