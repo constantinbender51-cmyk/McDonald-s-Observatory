@@ -11,17 +11,12 @@ today = ["open", "high", "low", "volume"]
 for c in today:
     df[c] = df[c].astype(float)
 
-# ----- lag 1 … 3 days -----
-LAGS = 3
-feat_cols = []
-for lag in range(1, LAGS + 1):
-    for col in today:
-        name = f"{col}_lag{lag}"
-        df[name] = df[col].shift(lag)
-        feat_cols.append(name)
+# ----- yesterday only (lag = 1) -----
+yest = ["yest_open", "yest_high", "yest_low", "yest_volume"]
+df[yest] = df[today].shift(1)
 
-FEATURES = today + feat_cols          # 4 + 12 = 16 columns
-df["y"]    = df["close"]              # same-day target
+FEATURES = today + yest          # 4 + 4 = 8 columns
+df["y"]    = df["close"]         # same-day target
 df.dropna(inplace=True)
 
 # ---------- 4. train/test split ----------
