@@ -179,10 +179,12 @@ for i in range(len(pred)):
     buy_hold *= 1 + next_ret
 
     # ---------- pretty print ----------
+    """
     print(f"{test_dates[i].strftime('%Y-%m-%d')}  "
           f"{i:3d}  {pred[i]:6.2f}  {next_ret*100:5.2f}  "
           f"{position:3d}  {capital:8.2f}  {buy_hold:8.2f}")
     time.sleep(0.01)
+    """
 # ---------- close final open position ----------
 if position != 0:
     gross = (1 + position * pct_change[entry_i:]/100).prod()
