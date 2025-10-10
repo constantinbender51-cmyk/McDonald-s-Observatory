@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+import os
+# MUST be set before importing numpy
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+
 import numpy as np
 import pandas as pd
 from numba import njit, prange
