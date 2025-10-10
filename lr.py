@@ -151,11 +151,16 @@ print(f"Price-change sign accuracy: {acc_price:10.1%}")
 start_capital = 100.0
 curve = [start_capital]
 
-for i in range(1, len(price_sign)):
-    if pred_sign[i] == price_sign[i]:          # same sign → win the move
-        pnl = abs(price_chg.iloc[i])
-    else:                                      # opposite sign → lose the move
-        pnl = -abs(price_chg.iloc[i])
+# make sure we use positional access only
+price_chg_vec = price_chg.values          # ndarray
+price_sign_vec = np.sign(price_chg_vec)   # ndarray
+
+for i in range(1, len(price_sign_vec)):
+    abs_move = abs(price_chg_vec[i])
+    if pred_sign[i] == price_sign_vec[i]:   # same sign → win
+        pnl = abs_move
+    else:                                   # opposite → lose
+        pnl = -abs_move
     curve.append(curve[-1] * (1 + pnl))
 
 final_value = curve[-1]
