@@ -152,4 +152,4 @@ for i in range(len(pred)):
 
     print(f"{i:3d}  {pred[i]:7.2f}  {pct_change[i]:6.2f}%  "
           f"{macd_signal[i]:8.2f}   {capital:8.2f}   {buy_hold:8.2f}   {macd_real:8.2f}")
-    time.sleep.(0.01)
+    time.sleep(0.01)
