@@ -131,7 +131,7 @@ for i in range(1, len(pred)):
         sig_switch.append((test_dates[i], pred[i]))
 
 print("\n===== 5-day MACD-distance forecast sign switches =====")
-print("date                  forecast")
+print("date                  forecast  sign")
 for d, val in sig_switch:
-    print(f"{d.strftime('%Y-%m-%d')}   {val:8.2f}")
+    print(f"{d.strftime('%Y-%m-%d')}   {val:8.2f}  {'1' if val >= 0 else '-1'}")
     time.sleep(0.01)
