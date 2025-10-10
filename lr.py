@@ -146,27 +146,3 @@ acc_price = (price_sign == pred_sign).mean()
 print("\n==========  SIGN ACCURACIES  ==========")
 print(f"MACD-signal sign accuracy : {acc_true:10.1%}")
 print(f"Price-change sign accuracy: {acc_price:10.1%}")
-
-# ---------- 9. equity curve: start = 100 ----------
-start_capital = 100.0
-curve = [start_capital]
-
-# make sure we use positional access only
-price_chg_vec = price_chg.values          # ndarray
-price_sign_vec = np.sign(price_chg_vec)   # ndarray
-
-for i in range(1, len(price_sign_vec)):
-    abs_move = abs(price_chg_vec[i])
-    if pred_sign[i] == price_sign_vec[i]:   # same sign → win
-        pnl = abs_move
-    else:                                   # opposite → lose
-        pnl = -abs_move
-    curve.append(curve[-1] * (1 + pnl))
-
-final_value = curve[-1]
-total_ret   = (final_value / start_capital - 1) * 100
-
-print("\n==========  SIMPLE PnL TRACK  ==========")
-print(f"Starting capital : {start_capital:8.2f}")
-print(f"Final value      : {final_value:8.2f}")
-print(f"Total return     : {total_ret:8.2f} %")
