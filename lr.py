@@ -121,3 +121,17 @@ for i in range(50):
     p = pred[i]
     print(f"{i:5d}  {a:8.2f}  {p:8.2f}  {a-p:8.2f}")
     time.sleep(0.01)
+
+# ---------- sign switches in the 5-day-ahead forecast ----------
+test_dates = test_df["date"].reset_index(drop=True)   # align with y_test/pred
+sig_switch = []
+
+for i in range(1, len(pred)):
+    if np.sign(pred[i]) != np.sign(pred[i-1]):        # zero-crossing
+        sig_switch.append((test_dates[i], pred[i]))
+
+print("\n===== 5-day MACD-distance forecast sign switches =====")
+print("date                  forecast")
+for d, val in sig_switch:
+    print(f"{d.strftime('%Y-%m-%d')}   {val:8.2f}")
+    time.sleep(0.01)
