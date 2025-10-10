@@ -54,8 +54,14 @@ def run_once(lookback, short_h, long_h, stop_pct, lev):
                            ("macd",  df["macd_signal"]))},
         axis=1
     )
-    shifted.columns = [f"{n}_{i}" for n in shifted.columns.get_level_values(0)
-                                      for i in range(lookback)]
+    # ---------- build lag matrix ----------
+    frames = {}
+    for i in range(lookback):
+        frames[f"stoch_{i}"] = df["stoch_rsi"].shift(lookback - i)
+        frames[f"pct_{i}"]   = df["pct_chg"].shift(lookback - i)
+        frames[f"vol_{i}"]   = df["vol_pct_chg"].shift(lookback - i)
+        frames[f"macd_{i}"]  = df["macd_signal"].shift(lookback - i)
+    shifted = pd.DataFrame(frames, index=df.index)
     df = pd.concat([df, shifted], axis=1)
 
     FEATURES = [f"{n}_{i}" for n in ["stoch", "pct", "vol", "macd"] for i in range(lookback)]
