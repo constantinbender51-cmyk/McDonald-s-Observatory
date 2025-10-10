@@ -244,13 +244,17 @@ for i in range(len(pred)):
         pnl = (curr_p / entry_p - 1) * position
         if pnl <= -stop_pct:
             capital *= (1 - cost)   # exit
-            position = entry_p = entry_idx = None
+            position   = 0
+            entry_p    = None
+            entry_idx  = None
 
     # ---------- 2. natural H-day exit ----------
     if position != 0 and entry_idx is not None:
         if i - entry_idx >= H - 1:          # H-1 because we entered on entry_idx
             capital *= (1 - cost)
-            position = entry_idx = entry_p = None
+            position   = 0
+            entry_p    = None
+            entry_idx  = None
 
     # ---------- 3. new entry only if |pred| ≥ 8 % and sign flip ----------
     new_sign = int(np.sign(pred[i])) if pred_mag >= 8.0 else 0
