@@ -43,7 +43,7 @@ df["vol_pct_chg"] = df["volume"].pct_change() * 100
 def ema(s, n): return s.ewm(span=n, adjust=False).mean()
 macd_line = ema(df["close"], 12) - ema(df["close"], 26)
 signal_line = ema(macd_line, 9)
-df["macd_sig"] = macd_line - signal_line
+df["macd_signal"] = macd_line - signal_line
 
 # ---------- 4. build 20-day look-back ----------
 lookback = 20
