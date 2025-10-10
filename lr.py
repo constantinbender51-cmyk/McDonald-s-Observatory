@@ -214,7 +214,7 @@ for i in range(len(pred)):
     buy_hold *= 1 + pct_change[i]/100
 
     # pretty print with date
-        print(f"{test_dates[i].strftime('%Y-%m-%d')}  {i:3d}  {pred[i]:7.2f}  "
+    print(f"{test_dates[i].strftime('%Y-%m-%d')}  {i:3d}  {pred[i]:7.2f}  "
           f"{pct_change[i]:6.2f}%  {macd_signal[i]:8.2f}   {capital:8.2f}   "
           f"{buy_hold:8.2f}   {macd_real:8.2f}   {stoch_real:8.2f}")
     time.sleep(0.01)
