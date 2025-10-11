@@ -165,4 +165,17 @@ print(f"6-day  MAE                  : {mae6:6.2f}%")
 print(f"10-day MAE                  : {mae10:6.2f}%")
 print(f"6-day  MSE                  : {mse6:6.2f}")
 print(f"10-day MSE                  : {mse10:6.2f}")
+# --------------------------------------------------
+# 5.  DO THE 6-day / 10-day FORECASTS GUESS
+#     TOMORROW'S DIRECTION CORRECTLY?
+# --------------------------------------------------
+# next-day return for the exact same oos window
+next_day_ret = (close[first+1:first+min_len+1] / close[first:first+min_len] - 1) * 100
+
+dir6_vs_1d  = (np.sign(pred6)  == np.sign(next_day_ret)).mean()
+dir10_vs_1d = (np.sign(pred10) == np.sign(next_day_ret)).mean()
+
+print("\nUsing long-horizon forecast to guess T+1 direction")
+print(f"pred6  → next-day accuracy : {dir6_vs_1d:6.1%}")
+print(f"pred10 → next-day accuracy : {dir10_vs_1d:6.1%}")
 
