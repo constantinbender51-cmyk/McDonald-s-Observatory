@@ -28,7 +28,8 @@ def build_plot():
     y_min = min(DF.equity.min(), DF.buyhold.min())
     y_max = max(DF.equity.max(), DF.buyhold.max())
     mid   = (y_max + y_min) / 2                 # vertical midpoint
-    scale = 10                                    # amplification factor
+    cap_range = y_max - y_min
+    scale = (cap_range / 2) / 10                # half the range divided by pred max value
 
     ax.plot(DF.index, mid + DF.pred6  * scale,
             label="Pred 6d",  color="#2ca02c", alpha=.6)
@@ -52,7 +53,6 @@ def build_plot():
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
-
 # ------------------------------------------------------------------
 # 3.  Flask route
 # ------------------------------------------------------------------
