@@ -1,1 +1,1 @@
-worker: python macd.py
+worker: python lr_strategy.py
