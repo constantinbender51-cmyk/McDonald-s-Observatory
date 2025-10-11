@@ -81,6 +81,9 @@ def create_features(df, lookback=10):
     df['stoch_rsi'] = calculate_stoch_rsi(df['close'])
     df['price_change_pct'] = df['close'].pct_change() * 100
     
+    # Calculate historical volatility for risk management
+    df['volatility_20d'] = df['close'].pct_change().rolling(window=20).std() * 100
+    
     feature_cols = []
     for i in range(1, lookback + 1):
         df[f'macd_diff_lag_{i}'] = df['macd_diff'].shift(i)
@@ -130,8 +133,8 @@ def train_models(df, feature_cols):
     
     return model_6d, model_10d, scaler, train_idx, test_idx
 
-def simulate_trading(df, model_6d, model_10d, scaler, feature_cols, test_idx, leverage=3):
-    """Simulate trading strategy on test set"""
+def simulate_trading(df, model_6d, model_10d, scaler, feature_cols, test_idx, leverage=3, stop_loss_pct=2.0, position_size_pct=0.95):
+    """Simulate trading strategy on test set with corrected position sizing and risk management"""
     test_df = df.loc[test_idx].copy()
     
     X_test = test_df[feature_cols]
@@ -142,116 +145,196 @@ def simulate_trading(df, model_6d, model_10d, scaler, feature_cols, test_idx, le
     
     test_df['pred_6d'] = pred_6d
     test_df['pred_10d'] = pred_10d
-    test_df['pred_6d_pct'] = test_df['target_6d_pct']
     
     initial_capital = 10000
     cash = initial_capital
-    position = 0
+    position_size = 0  # Number of BTC held
     position_type = None
     entry_price = 0
-    stop_loss = 0
+    stop_loss_price = 0
     
     equity_curve = []
     trades = []
     
     print("\nSimulating trading strategy...")
+    print(f"Leverage: {leverage}x")
+    print(f"Stop Loss: {stop_loss_pct}%")
+    print(f"Position Size: {position_size_pct * 100}% of available capital")
     
     for idx, row in test_df.iterrows():
         current_price = row['close']
         pred_6 = row['pred_6d']
         pred_10 = row['pred_10d']
         
-        current_equity = cash
-        if position != 0:
+        # Calculate current equity value
+        if position_size == 0:
+            current_equity = cash
+        else:
             if position_type == 'long':
-                current_equity = cash + position * (current_price - entry_price) * leverage
-            else:
-                current_equity = cash + position * (entry_price - current_price) * leverage
+                # For long: profit = position_size * (current_price - entry_price)
+                unrealized_pnl = position_size * (current_price - entry_price)
+                current_equity = cash + unrealized_pnl
+            else:  # short
+                # For short: profit = position_size * (entry_price - current_price)
+                unrealized_pnl = position_size * (entry_price - current_price)
+                current_equity = cash + unrealized_pnl
         
-        equity_curve.append({'date': row['timestamp'], 'equity': current_equity, 
-                           'price': current_price, 'position': position_type})
+        equity_curve.append({
+            'date': row['timestamp'], 
+            'equity': current_equity, 
+            'price': current_price, 
+            'position': position_type if position_type else 'cash'
+        })
         
-        if position != 0:
-            if position_type == 'long' and current_price <= stop_loss:
-                pnl = position * (current_price - entry_price) * leverage
+        # Check stop loss first if we have a position
+        if position_size > 0:
+            stop_loss_triggered = False
+            
+            if position_type == 'long' and current_price <= stop_loss_price:
+                stop_loss_triggered = True
+            elif position_type == 'short' and current_price >= stop_loss_price:
+                stop_loss_triggered = True
+            
+            if stop_loss_triggered:
+                if position_type == 'long':
+                    pnl = position_size * (current_price - entry_price)
+                else:
+                    pnl = position_size * (entry_price - current_price)
+                
                 cash += pnl
-                trades.append({'entry_price': entry_price, 'exit_price': current_price, 
-                             'type': position_type, 'pnl': pnl})
-                position = 0
+                
+                trades.append({
+                    'entry_date': row['timestamp'],
+                    'entry_price': entry_price, 
+                    'exit_price': current_price, 
+                    'type': position_type, 
+                    'pnl': pnl,
+                    'exit_reason': 'stop_loss'
+                })
+                
+                position_size = 0
                 position_type = None
                 continue
         
+        # Determine signal alignment
         both_positive = (pred_6 == 1) and (pred_10 == 1)
         both_negative = (pred_6 == 0) and (pred_10 == 0)
         misaligned = (pred_6 != pred_10)
         
-        if position == 0:
+        # Trading logic
+        if position_size == 0:
+            # No position - look to enter
             if both_positive:
-                position = cash / current_price
+                # Enter long position
+                capital_to_use = cash * position_size_pct
+                position_size = (capital_to_use * leverage) / current_price
                 position_type = 'long'
                 entry_price = current_price
-                stop_loss = current_price * (1 + row['pred_6d_pct'] * 0.8 / 100)
-                cash = 0
+                stop_loss_price = current_price * (1 - stop_loss_pct / 100)
+                cash = cash - capital_to_use
                 
             elif both_negative:
-                position = cash / current_price
+                # Enter short position
+                capital_to_use = cash * position_size_pct
+                position_size = (capital_to_use * leverage) / current_price
                 position_type = 'short'
                 entry_price = current_price
-                stop_loss = current_price * (1 - row['pred_6d_pct'] * 0.8 / 100)
-                cash = 0
+                stop_loss_price = current_price * (1 + stop_loss_pct / 100)
+                cash = cash - capital_to_use
         
         else:
+            # We have a position - check if we should exit
+            should_exit = False
+            exit_reason = ''
+            
             if misaligned:
+                # Models disagree - exit position
+                should_exit = True
+                exit_reason = 'signal_misalignment'
+                
+            elif (both_positive and position_type == 'short'):
+                # Signal reversed from bearish to bullish while short
+                should_exit = True
+                exit_reason = 'signal_reversal'
+                
+            elif (both_negative and position_type == 'long'):
+                # Signal reversed from bullish to bearish while long
+                should_exit = True
+                exit_reason = 'signal_reversal'
+            
+            if should_exit:
+                # Close position
                 if position_type == 'long':
-                    pnl = position * (current_price - entry_price) * leverage
+                    pnl = position_size * (current_price - entry_price)
                 else:
-                    pnl = position * (entry_price - current_price) * leverage
-                    
+                    pnl = position_size * (entry_price - current_price)
+                
                 cash += pnl
-                trades.append({'entry_price': entry_price, 'exit_price': current_price, 
-                             'type': position_type, 'pnl': pnl})
-                position = 0
+                
+                trades.append({
+                    'entry_date': row['timestamp'],
+                    'entry_price': entry_price, 
+                    'exit_price': current_price, 
+                    'type': position_type, 
+                    'pnl': pnl,
+                    'exit_reason': exit_reason
+                })
+                
+                position_size = 0
                 position_type = None
                 
-            elif (both_positive and position_type == 'short') or (both_negative and position_type == 'long'):
-                if position_type == 'long':
-                    pnl = position * (current_price - entry_price) * leverage
-                else:
-                    pnl = position * (entry_price - current_price) * leverage
-                    
-                cash += pnl
-                trades.append({'entry_price': entry_price, 'exit_price': current_price, 
-                             'type': position_type, 'pnl': pnl})
-                
-                if both_positive:
-                    position = cash / current_price
-                    position_type = 'long'
-                    entry_price = current_price
-                    stop_loss = current_price * (1 + row['pred_6d_pct'] * 0.8 / 100)
-                    cash = 0
-                else:
-                    position = cash / current_price
-                    position_type = 'short'
-                    entry_price = current_price
-                    stop_loss = current_price * (1 - row['pred_6d_pct'] * 0.8 / 100)
-                    cash = 0
+                # Check if we should immediately enter opposite position after reversal
+                if exit_reason == 'signal_reversal':
+                    if both_positive:
+                        capital_to_use = cash * position_size_pct
+                        position_size = (capital_to_use * leverage) / current_price
+                        position_type = 'long'
+                        entry_price = current_price
+                        stop_loss_price = current_price * (1 - stop_loss_pct / 100)
+                        cash = cash - capital_to_use
+                        
+                    elif both_negative:
+                        capital_to_use = cash * position_size_pct
+                        position_size = (capital_to_use * leverage) / current_price
+                        position_type = 'short'
+                        entry_price = current_price
+                        stop_loss_price = current_price * (1 + stop_loss_pct / 100)
+                        cash = cash - capital_to_use
     
-    if position != 0:
+    # Close any remaining position at end of test period
+    if position_size > 0:
         final_price = test_df.iloc[-1]['close']
         if position_type == 'long':
-            pnl = position * (final_price - entry_price) * leverage
+            pnl = position_size * (final_price - entry_price)
         else:
-            pnl = position * (entry_price - final_price) * leverage
+            pnl = position_size * (entry_price - final_price)
+        
         cash += pnl
-        trades.append({'entry_price': entry_price, 'exit_price': final_price, 
-                     'type': position_type, 'pnl': pnl})
+        
+        trades.append({
+            'entry_date': test_df.iloc[-1]['timestamp'],
+            'entry_price': entry_price, 
+            'exit_price': final_price, 
+            'type': position_type, 
+            'pnl': pnl,
+            'exit_reason': 'end_of_period'
+        })
     
     final_equity = cash
     
+    # Calculate performance metrics
     start_price = test_df.iloc[0]['close']
     end_price = test_df.iloc[-1]['close']
     buy_hold_return = ((end_price - start_price) / start_price) * 100
     strategy_return = ((final_equity - initial_capital) / initial_capital) * 100
+    
+    # Calculate additional metrics
+    winning_trades = [t for t in trades if t['pnl'] > 0]
+    losing_trades = [t for t in trades if t['pnl'] <= 0]
+    
+    win_rate = (len(winning_trades) / len(trades) * 100) if trades else 0
+    avg_win = np.mean([t['pnl'] for t in winning_trades]) if winning_trades else 0
+    avg_loss = np.mean([t['pnl'] for t in losing_trades]) if losing_trades else 0
     
     print(f"\nResults:")
     print(f"Initial Capital: ${initial_capital:,.2f}")
@@ -259,6 +342,9 @@ def simulate_trading(df, model_6d, model_10d, scaler, feature_cols, test_idx, le
     print(f"Strategy Return: {strategy_return:.2f}%")
     print(f"Buy & Hold Return: {buy_hold_return:.2f}%")
     print(f"Number of Trades: {len(trades)}")
+    print(f"Win Rate: {win_rate:.2f}%")
+    print(f"Average Win: ${avg_win:.2f}")
+    print(f"Average Loss: ${avg_loss:.2f}")
     
     return equity_curve, trades, final_equity, strategy_return, buy_hold_return
 
@@ -271,13 +357,14 @@ def main():
     model_6d, model_10d, scaler, train_idx, test_idx = train_models(df, feature_cols)
     
     equity_curve, trades, final_equity, strategy_return, buy_hold_return = simulate_trading(
-        df, model_6d, model_10d, scaler, feature_cols, test_idx, leverage=3
+        df, model_6d, model_10d, scaler, feature_cols, test_idx, 
+        leverage=3, stop_loss_pct=2.0, position_size_pct=0.95
     )
     
     results_df = pd.DataFrame({
         'Metric': ['Initial Capital', 'Final Equity', 'Strategy Return (%)', 
-                   'Buy & Hold Return (%)', 'Number of Trades', 'Leverage'],
-        'Value': [10000, final_equity, strategy_return, buy_hold_return, len(trades), 3]
+                   'Buy & Hold Return (%)', 'Number of Trades', 'Leverage', 'Stop Loss (%)'],
+        'Value': [10000, final_equity, strategy_return, buy_hold_return, len(trades), 3, 2.0]
     })
     
     equity_df = pd.DataFrame(equity_curve)
