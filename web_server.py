@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime
 import glob
+import sys
 
 app = Flask(__name__)
 
@@ -289,5 +290,21 @@ def index():
     )
 
 if __name__ == '__main__':
+    # Check if results already exist
+    results_files = glob.glob('btc_trading_results_*.csv')
+    
+    if not results_files:
+        print("No existing results found. Running trading strategy first...")
+        # Import and run the trading strategy
+        try:
+            from main import main as run_trading_strategy
+            run_trading_strategy()
+            print("Trading strategy completed successfully!")
+        except Exception as e:
+            print(f"Error running trading strategy: {e}")
+            sys.exit(1)
+    else:
+        print("Found existing results. Starting web server...")
+    
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False)
