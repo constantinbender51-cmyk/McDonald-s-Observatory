@@ -356,11 +356,22 @@ def main():
     
     model_6d, model_10d, scaler, train_idx, test_idx = train_models(df, feature_cols)
     
+    # ⬇️ Add this block here (right after training)
+    test_df = df.loc[test_idx].copy()
+    X_test = test_df[feature_cols]
+    X_test_scaled = scaler.transform(X_test)
+    test_df['pred_6d'] = model_6d.predict(X_test_scaled)
+    test_df['pred_10d'] = model_10d.predict(X_test_scaled)
+    
+    # Shift predictions forward by one day to avoid lookahead bias
+    test_df[['pred_6d', 'pred_10d']] = test_df[['pred_6d', 'pred_10d']].shift(1)
+    test_df = test_df.dropna()
+
+    # Then run simulation using the shifted signals
     equity_curve, trades, final_equity, strategy_return, buy_hold_return = simulate_trading(
         df, model_6d, model_10d, scaler, feature_cols, test_idx, 
         leverage=3, stop_loss_pct=2.0, position_size_pct=0.95
-    )
-    
+    )    
     results_df = pd.DataFrame({
         'Metric': ['Initial Capital', 'Final Equity', 'Strategy Return (%)', 
                    'Buy & Hold Return (%)', 'Number of Trades', 'Leverage', 'Stop Loss (%)'],
