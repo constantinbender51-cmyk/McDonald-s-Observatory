@@ -4,7 +4,7 @@ matplotlib.use("Agg")          # headless
 import matplotlib.pyplot as plt
 from flask import Flask, Response
 from pathlib import Path
-from io import BytesIO
+import io
 
 
 app = Flask(__name__)
