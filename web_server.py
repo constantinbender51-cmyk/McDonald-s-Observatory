@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 import glob
 import sys
+import json
 
 app = Flask(__name__)
 
@@ -12,6 +13,7 @@ HTML_TEMPLATE = """
 <html>
 <head>
     <title>BTC Trading Strategy Results</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -114,12 +116,17 @@ HTML_TEMPLATE = """
             padding: 20px;
             background: #f8f9fa;
             border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
         }
         .timestamp {
             text-align: center;
             color: #95a5a6;
             margin-top: 30px;
             font-size: 0.9em;
+        }
+        #equityCurve {
+            width: 100%;
+            height: 600px;
         }
     </style>
 </head>
@@ -152,6 +159,13 @@ HTML_TEMPLATE = """
             <div class="metric-card neutral">
                 <h3>Total Trades</h3>
                 <p class="value">{{ num_trades }}</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📈 Equity Curve Performance</h2>
+            <div class="chart-container">
+                <div id="equityCurve"></div>
             </div>
         </div>
 
@@ -206,7 +220,7 @@ HTML_TEMPLATE = """
         {% endif %}
 
         <div class="section">
-            <h2>📈 Equity Curve Sample (Last 30 Days)</h2>
+            <h2>📋 Equity Curve Sample (Last 30 Days)</h2>
             <table>
                 <thead>
                     <tr>
@@ -231,6 +245,119 @@ HTML_TEMPLATE = """
 
         <p class="timestamp">Generated on {{ timestamp }}</p>
     </div>
+
+    <script>
+        var chartData = {{ chart_data | safe }};
+        
+        var traces = [
+            {
+                x: chartData.dates,
+                y: chartData.strategy_equity,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Strategy Equity',
+                line: {
+                    color: '#667eea',
+                    width: 2.5
+                }
+            },
+            {
+                x: chartData.dates,
+                y: chartData.buy_hold_equity,
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Buy & Hold',
+                line: {
+                    color: '#95a5a6',
+                    width: 2,
+                    dash: 'dash'
+                }
+            }
+        ];
+
+        if (chartData.entry_dates.length > 0) {
+            traces.push({
+                x: chartData.entry_dates,
+                y: chartData.entry_values,
+                type: 'scatter',
+                mode: 'markers',
+                name: 'Entry',
+                marker: {
+                    color: '#38ef7d',
+                    size: 10,
+                    symbol: 'triangle-up',
+                    line: {
+                        color: '#11998e',
+                        width: 2
+                    }
+                }
+            });
+        }
+
+        if (chartData.exit_dates.length > 0) {
+            traces.push({
+                x: chartData.exit_dates,
+                y: chartData.exit_values,
+                type: 'scatter',
+                mode: 'markers',
+                name: 'Exit',
+                marker: {
+                    color: '#ff6a00',
+                    size: 10,
+                    symbol: 'triangle-down',
+                    line: {
+                        color: '#ee0979',
+                        width: 2
+                    }
+                }
+            });
+        }
+
+        var layout = {
+            title: {
+                text: 'Strategy Performance vs Buy & Hold Benchmark',
+                font: {
+                    size: 20,
+                    color: '#2c3e50'
+                }
+            },
+            xaxis: {
+                title: 'Date',
+                showgrid: true,
+                gridcolor: '#ecf0f1'
+            },
+            yaxis: {
+                title: 'Equity ($)',
+                showgrid: true,
+                gridcolor: '#ecf0f1'
+            },
+            hovermode: 'x unified',
+            plot_bgcolor: 'white',
+            paper_bgcolor: '#f8f9fa',
+            legend: {
+                x: 0.02,
+                y: 0.98,
+                bgcolor: 'rgba(255,255,255,0.9)',
+                bordercolor: '#bdc3c7',
+                borderwidth: 1
+            },
+            margin: {
+                l: 60,
+                r: 30,
+                t: 80,
+                b: 60
+            }
+        };
+
+        var config = {
+            responsive: true,
+            displayModeBar: true,
+            displaylogo: false,
+            modeBarButtonsToRemove: ['lasso2d', 'select2d']
+        };
+
+        Plotly.newPlot('equityCurve', traces, layout, config);
+    </script>
 </body>
 </html>
 """
@@ -254,6 +381,61 @@ def load_latest_results():
     
     return summary_df, equity_df, trades_df
 
+def prepare_chart_data(equity_df, trades_df, initial_capital):
+    """Prepare data for the equity curve chart"""
+    equity_df = equity_df.copy()
+    
+    if 'date' not in equity_df.columns:
+        equity_df['date'] = equity_df.index
+    
+    equity_df['date'] = pd.to_datetime(equity_df['date'])
+    
+    if 'price' in equity_df.columns and initial_capital:
+        first_price = equity_df['price'].iloc[0]
+        equity_df['buy_hold_equity'] = initial_capital * (equity_df['price'] / first_price)
+    else:
+        equity_df['buy_hold_equity'] = initial_capital
+    
+    entry_dates = []
+    entry_values = []
+    exit_dates = []
+    exit_values = []
+    
+    if trades_df is not None and len(trades_df) > 0:
+        trades_df = trades_df.copy()
+        
+        if 'entry_date' in trades_df.columns:
+            trades_df['entry_date'] = pd.to_datetime(trades_df['entry_date'])
+            for _, trade in trades_df.iterrows():
+                entry_date = trade['entry_date']
+                equity_at_entry = equity_df[equity_df['date'] <= entry_date]['equity'].iloc[-1] if len(equity_df[equity_df['date'] <= entry_date]) > 0 else None
+                
+                if equity_at_entry is not None:
+                    entry_dates.append(entry_date.strftime('%Y-%m-%d'))
+                    entry_values.append(equity_at_entry)
+        
+        if 'exit_date' in trades_df.columns:
+            trades_df['exit_date'] = pd.to_datetime(trades_df['exit_date'])
+            for _, trade in trades_df.iterrows():
+                exit_date = trade['exit_date']
+                equity_at_exit = equity_df[equity_df['date'] <= exit_date]['equity'].iloc[-1] if len(equity_df[equity_df['date'] <= exit_date]) > 0 else None
+                
+                if equity_at_exit is not None:
+                    exit_dates.append(exit_date.strftime('%Y-%m-%d'))
+                    exit_values.append(equity_at_exit)
+    
+    chart_data = {
+        'dates': equity_df['date'].dt.strftime('%Y-%m-%d').tolist(),
+        'strategy_equity': equity_df['equity'].tolist(),
+        'buy_hold_equity': equity_df['buy_hold_equity'].tolist(),
+        'entry_dates': entry_dates,
+        'entry_values': entry_values,
+        'exit_dates': exit_dates,
+        'exit_values': exit_values
+    }
+    
+    return json.dumps(chart_data)
+
 @app.route('/')
 def index():
     """Main route to display results"""
@@ -269,6 +451,8 @@ def index():
     strategy_return = metrics.get('Strategy Return (%)', 0)
     buy_hold_return = metrics.get('Buy & Hold Return (%)', 0)
     num_trades = int(metrics.get('Number of Trades', 0))
+    
+    chart_data = prepare_chart_data(equity_data, trades_data, initial_capital)
     
     equity_display = equity_data.tail(30) if len(equity_data) > 30 else equity_data
     trades_display = trades_data.tail(20) if trades_data is not None and len(trades_data) > 20 else trades_data
@@ -286,16 +470,15 @@ def index():
         strategy_return=strategy_return,
         buy_hold_return=buy_hold_return,
         num_trades=num_trades,
-        timestamp=timestamp
+        timestamp=timestamp,
+        chart_data=chart_data
     )
 
 if __name__ == '__main__':
-    # Check if results already exist
     results_files = glob.glob('btc_trading_results_*.csv')
     
     if not results_files:
         print("No existing results found. Running trading strategy first...")
-        # Import and run the trading strategy
         try:
             from main import main as run_trading_strategy
             run_trading_strategy()
