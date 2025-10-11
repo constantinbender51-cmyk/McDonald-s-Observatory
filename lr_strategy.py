@@ -213,9 +213,33 @@ print(f"pred10 → next-day accuracy : {dir10_vs_1d:6.1%}")
 # 5.  WRITE CSV + START WEB SERVER
 # --------------------------------------------------
 csv_path = Path("results.csv")
-pd.DataFrame(results, columns=["date","pred6","pred10","pos","equity","buyhold"]).to_csv(csv_path, index=False)
-print(f"\nResults saved → {csv_path.resolve()}")
 
+# Create results with proper date alignment
+# pred6[i] forecasts 6 days ahead, so it should be plotted at date[first+i+6]
+# pred10[i] forecasts 10 days ahead, so it should be plotted at date[first+i+10]
+results_fixed = []
+for i in range(len(results)):
+    date_str = results[i][0]
+    
+    # Shift prediction dates forward to match their forecast horizons
+    date_pred6 = df['date'].iloc[first+i+6].strftime('%Y-%m-%d') if first+i+6 < len(df) else date_str
+    date_pred10 = df['date'].iloc[first+i+10].strftime('%Y-%m-%d') if first+i+10 < len(df) else date_str
+    
+    results_fixed.append([
+        date_str,           # actual date for equity tracking
+        date_pred6,         # date where pred6 forecast applies
+        date_pred10,        # date where pred10 forecast applies
+        results[i][1],      # pred6 value
+        results[i][2],      # pred10 value
+        results[i][3],      # position
+        results[i][4],      # equity
+        results[i][5]       # buyhold
+    ])
+
+pd.DataFrame(results_fixed, 
+             columns=["date","date_pred6","date_pred10","pred6","pred10","pos","equity","buyhold"]
+            ).to_csv(csv_path, index=False)
+print(f"\nResults saved → {csv_path.resolve()}")
 # fire up the web-plotter
 import subprocess, webbrowser, time, os
 port = int(os.environ.get("PORT", 5000))
