@@ -1,14 +1,56 @@
-import pandas as pd
-import numpy as np
+# --------------------------------------------------
+# 0.  FETCH FULL BTC DAILY HISTORY FROM BINANCE
+# --------------------------------------------------
+import requests, math, time, pandas as pd, numpy as np
 from pathlib import Path
-import time
 
-CSV_FILE = Path("btc_daily.csv")
-df = pd.read_csv(CSV_FILE, parse_dates=["date"]).sort_values("date")
+BINANCE_CSV = Path("btc_daily.csv")
+
+def fetch_binance_daily(symbol="BTCUSDT"):
+    """Return a DataFrame with columns ['date', 'close', 'volume'] since 2017-08-17."""
+    if BINANCE_CSV.exists():
+        print("Loading cached", BINANCE_CSV)
+        return pd.read_csv(BINANCE_CSV, parse_dates=["date"])
+
+    print("Downloading full daily history from Binance …")
+    root = "https://api.binance.com/api/v3/klines"
+    limit = 1000                       # max per call
+    interval = "1d"
+    start_time = 1502928000000         # 2017-08-17 00:00 UTC
+    end_time   = int(time.time()*1000)
+    data = []
+
+    while start_time < end_time:
+        params = dict(symbol=symbol, interval=interval,
+                      startTime=start_time, limit=limit)
+        r = requests.get(root, params=params, timeout=30)
+        r.raise_for_status()
+        batch = r.json()
+        if not batch:
+            break
+        data.extend(batch)
+        start_time = batch[-1][6] + 1   # next call starts after last close time
+        time.sleep(0.2)                 # be polite
+
+    df = (pd.DataFrame(data,
+                       columns="open_time o h l c v close_time qav n taker_base_qav taker_quote_qav ignore".split())
+            .loc[:, ["close_time", "c", "v"]]
+            .rename(columns={"close_time": "date", "c": "close", "v": "volume"})
+            .assign(date=lambda x: pd.to_datetime(x["date"], unit="ms"),
+                    close=lambda x: x["close"].astype(float),
+                    volume=lambda x: x["volume"].astype(float))
+            .sort_values("date")
+            .reset_index(drop=True))
+    df.to_csv(BINANCE_CSV, index=False)
+    print("Saved", len(df), "rows to", BINANCE_CSV)
+    return df
+
+df = fetch_binance_daily()
 close = df["close"].values
-
-# ---------- 1.  FEATURES + STANDARDISATION  ----------
-lookback = 10                                      # << changed
+# --------------------------------------------------
+# 1.  FEATURES + STANDARDISATION  (your code below)
+# --------------------------------------------------
+lookback = 10
 stoch_cols = [f"stoch_{i}" for i in range(lookback)]
 pct_cols   = [f"pct_{i}"   for i in range(lookback)]
 vol_cols   = [f"vol_{i}"   for i in range(lookback)]
@@ -70,39 +112,37 @@ def train_model(horizon):
     pred  = model.predict(X[s:])
     return pred
 
-pred6  = train_model(6)    # << changed
-pred10 = train_model(10)   # << changed
+pred6  = train_model(6)
+pred10 = train_model(10)
 
 # ----------  3.  TRADE  ----------
 first = split
-min_len = min(len(pred6), len(pred10))             # << changed
+min_len = min(len(pred6), len(pred10))
 pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
 
-pred6  = pred6 [:min_len]                          # << changed
-pred10 = pred10[:min_len]                          # << changed
+pred6  = pred6 [:min_len]
+pred10 = pred10[:min_len]
 
 capital = 1000.0
 buyhold = 1000.0
-lev     = 3.0                                       # << changed
-stop    = 0.80                                      # << changed
+lev     = 3.0
+stop    = 0.80
 
 pos     = 0
 entry_i = 0
-
 max_cap = capital
 worst_dd = 0.0
 
 print("date        6d%  10d%  pos  equity   buy&hold")
-
 for i in range(len(pct1d)):
-    p6, p10 = pred6[i], pred10[i]                   # << changed
+    p6, p10 = pred6[i], pred10[i]
     new_pos = 0
     if   p6 > 0 and p10 > 0: new_pos =  1
     elif p6 < 0 and p10 < 0: new_pos = -1
 
     if pos != 0:
         realised = (close[first+i] / close[first+entry_i] - 1) * 100 * pos
-        if realised <= -stop * abs(pred6[entry_i]):   # << changed
+        if realised <= -stop * abs(pred6[entry_i]):
             new_pos = 0
         if pos ==  1 and p6 < 0 and p10 < 0: new_pos = 0
         if pos == -1 and p6 > 0 and p10 > 0: new_pos = 0
@@ -117,7 +157,6 @@ for i in range(len(pct1d)):
 
     buyhold *= 1 + pct1d[i]
 
-    # --- track worst single-day equity drop ---
     if capital > max_cap:
         max_cap = capital
     dd = (capital - max_cap) / max_cap * 100
@@ -128,7 +167,6 @@ for i in range(len(pct1d)):
           f"{p6:5.1f}  {p10:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
     time.sleep(0.01)
 
-# final close-out
 if pos != 0:
     gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
     capital *= gross
@@ -137,24 +175,19 @@ print(f"\nFinal equity (3×) : {capital:8.2f}")
 print(f"Buy & hold        : {buyhold:8.2f}")
 print(f"Excess            : {capital - buyhold:8.2f}")
 print(f"Worst trade (%)   : {worst_dd:8.2f}")
+
 # --------------------------------------------------
-# 4.  ACCURACY & ERROR METRICS  (add after the loop)
+# 4.  ACCURACY & ERROR METRICS
 # --------------------------------------------------
-# realised 6-day and 10-day returns (already computed inside train_model)
 d = df.copy()
 d["y6"]  = (d["close"].shift(-6)  / d["close"] - 1) * 100
 d["y10"] = (d["close"].shift(-10) / d["close"] - 1) * 100
-d = d.iloc[split:split+min_len]          # same out-of-sample window
+d = d.iloc[split:split+min_len]
 
-# --- directional accuracy ---
 acc6  = (np.sign(d["y6"].values)  == np.sign(pred6)).mean()
 acc10 = (np.sign(d["y10"].values) == np.sign(pred10)).mean()
-
-# --- mean absolute error (MAE) ---
 mae6  = np.abs(d["y6"].values  - pred6).mean()
 mae10 = np.abs(d["y10"].values - pred10).mean()
-
-# --- mean squared error (MSE) ---
 mse6  = ((d["y6"].values  - pred6) ** 2).mean()
 mse10 = ((d["y10"].values - pred10) ** 2).mean()
 
@@ -165,13 +198,8 @@ print(f"6-day  MAE                  : {mae6:6.2f}%")
 print(f"10-day MAE                  : {mae10:6.2f}%")
 print(f"6-day  MSE                  : {mse6:6.2f}")
 print(f"10-day MSE                  : {mse10:6.2f}")
-# --------------------------------------------------
-# 5.  DO THE 6-day / 10-day FORECASTS GUESS
-#     TOMORROW'S DIRECTION CORRECTLY?
-# --------------------------------------------------
-# next-day return for the exact same oos window
-next_day_ret = (close[first+1:first+min_len+1] / close[first:first+min_len] - 1) * 100
 
+next_day_ret = (close[first+1:first+min_len+1] / close[first:first+min_len] - 1) * 100
 dir6_vs_1d  = (np.sign(pred6)  == np.sign(next_day_ret)).mean()
 dir10_vs_1d = (np.sign(pred10) == np.sign(next_day_ret)).mean()
 
