@@ -22,41 +22,39 @@ def build_plot():
     fig, ax = plt.subplots(figsize=(14, 7))
 
     # ------------------------------------------------------------------
-    # 1.  dollar curves (left axis) – nothing special
+    # 1.  dollar curves (left axis)
     # ------------------------------------------------------------------
     ax.plot(DF.index, DF.equity,  label='Strategy equity', color='#1f77b4', lw=1.8)
     ax.plot(DF.index, DF.buyhold, label='Buy & hold',      color='#ff7f0e', lw=1.8)
     ax.set_ylabel('Capital ($)', fontsize=11)
-    ax.set_ylim(0, None)
 
     # ------------------------------------------------------------------
-    # 2.  rescale forecasts so they overlay nicely
+    # 2.  centre % forecasts at mid-height of the dollar axis
     # ------------------------------------------------------------------
-    idx0   = DF.index[0]
-    eq0    = DF.loc[idx0, 'equity']          # first equity value
-    scale6 = eq0 / 100                       # 1 %  → 1 scale-unit
-    scale10= eq0 / 100
+    y_min, y_max = ax.get_ylim()
+    mid_height   = (y_max + y_min) / 2
+    half_height  = (y_max - y_min) / 2
 
-    # convert % forecasts to “indexed” capital lines
-    pred6_scaled  = eq0 + DF.pred6  * scale6
-    pred10_scaled = eq0 + DF.pred10 * scale10
+    # scale: 30 % should span half the window
+    scale = half_height / 30.0
+    pred6_centred  = mid_height + DF.pred6  * scale
+    pred10_centred = mid_height + DF.pred10 * scale
 
-    ax.plot(DF.index, pred6_scaled,  label='Pred 6d (%)',  color='#2ca02c', lw=1.2, alpha=.8)
-    ax.plot(DF.index, pred10_scaled, label='Pred 10d (%)', color='#d62728', lw=1.2, alpha=.8)
+    ax.plot(DF.index, pred6_centred,  label='Pred 6d (%)',  color='#2ca02c', lw=1.4, alpha=.9)
+    ax.plot(DF.index, pred10_centred, label='Pred 10d (%)', color='#d62728', lw=1.4, alpha=.9)
 
     # ------------------------------------------------------------------
-    # 3.  fake right axis that shows the original % values
+    # 3.  right axis with true % labels
     # ------------------------------------------------------------------
     ax2 = ax.twinx()
-    ax2.set_ylim((ax.get_ylim()[0] - eq0) / scale6,
-                 (ax.get_ylim()[1] - eq0) / scale6)
+    ax2.set_ylim(-30, 30)                       # match the ±30 % range
     ax2.set_ylabel('Forecast (%)', fontsize=11)
     ax2.axhline(0, color='k', lw=.5, ls='--')
 
     # ------------------------------------------------------------------
-    # 4.  position bars (still on main axis, very faint)
+    # 4.  faint position bars
     # ------------------------------------------------------------------
-    ax.bar(DF.index, DF.pos * ax.get_ylim()[1] * .03,
+    ax.bar(DF.index, DF.pos * half_height * .05,
            width=.8, alpha=.15, color='grey', label='Position')
 
     # ------------------------------------------------------------------
