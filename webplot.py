@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")          # headless
 import matplotlib.pyplot as plt
-from flask import Flask, Response, render_string
+from flask import Flask, Response
 from pathlib import Path
 
 app = Flask(__name__)
