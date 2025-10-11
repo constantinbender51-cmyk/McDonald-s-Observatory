@@ -19,47 +19,28 @@ DF = pd.read_csv(CSV_FILE, parse_dates=["date"]).set_index("date")
 # 2.  Build the figure
 # ------------------------------------------------------------------
 def build_plot():
+    import io
     fig, ax = plt.subplots(figsize=(14, 7))
 
-    # ------------------------------------------------------------------
-    # 1.  dollar curves (left axis)
-    # ------------------------------------------------------------------
+    # 1.  capital curves (LEFT axis)
     ax.plot(DF.index, DF.equity,  label='Strategy equity', color='#1f77b4', lw=1.8)
     ax.plot(DF.index, DF.buyhold, label='Buy & hold',      color='#ff7f0e', lw=1.8)
     ax.set_ylabel('Capital ($)', fontsize=11)
 
-    # ------------------------------------------------------------------
-    # 2.  centre % forecasts at mid-height of the dollar axis
-    # ------------------------------------------------------------------
-    y_min, y_max = ax.get_ylim()
-    mid_height   = (y_max + y_min) / 2
-    half_height  = (y_max - y_min) / 2
-
-    # scale: 30 % should span half the window
-    scale = half_height / 30.0
-    pred6_centred  = mid_height + DF.pred6  * scale
-    pred10_centred = mid_height + DF.pred10 * scale
-
-    ax.plot(DF.index, pred6_centred,  label='Pred 6d (%)',  color='#2ca02c', lw=1.4, alpha=.9)
-    ax.plot(DF.index, pred10_centred, label='Pred 10d (%)', color='#d62728', lw=1.4, alpha=.9)
-
-    # ------------------------------------------------------------------
-    # 3.  right axis with true % labels
-    # ------------------------------------------------------------------
+    # 2.  prediction curves (RIGHT axis)  –  this keeps auto-scale
     ax2 = ax.twinx()
-    ax2.set_ylim(-30, 30)                       # match the ±30 % range
+    ax2.plot(DF.index, DF.pred6,  label='Pred 6d (%)',  color='#2ca02c', lw=1.4, alpha=.9)
+    ax2.plot(DF.index, DF.pred10, label='Pred 10d (%)', color='#d62728', lw=1.4, alpha=.9)
+    ax2.axhline(0, color='k', lw=.6, ls='--')
     ax2.set_ylabel('Forecast (%)', fontsize=11)
-    ax2.axhline(0, color='k', lw=.5, ls='--')
 
-    # ------------------------------------------------------------------
-    # 4.  faint position bars
-    # ------------------------------------------------------------------
-    ax.bar(DF.index, DF.pos * half_height * .05,
-           width=.8, alpha=.15, color='grey', label='Position')
+    # 3.  position bars – full height on LEFT axis
+    ax.bar(DF.index, DF.pos, width=.8, alpha=.25, color='grey', label='Position')
+    ax.set_ylim(-1.2, 1.2)          # -1 / 0 / +1
+    ax.set_yticks([-1, 0, 1])
+    ax.set_yticklabels(['short', 'flat', 'long'])
 
-    # ------------------------------------------------------------------
-    # 5.  cosmetics
-    # ------------------------------------------------------------------
+    # 4.  cosmetics
     ax.set_title('BTC-USD strategy – capital & overlayed forecasts', fontsize=13)
     ax.legend(loc='upper left')
     ax.grid(True, ls='--', lw=.4)
