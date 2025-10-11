@@ -4,7 +4,7 @@
 import requests, math, time, pandas as pd, numpy as np
 from pathlib import Path
 
-BINANCE_CSV = Path("btc_daily.csv")
+BINANCE_CSV = Path("btc_daily_bin.csv")
 
 def fetch_binance_daily(symbol="BTCUSDT"):
     """Return a DataFrame with columns ['date', 'close', 'volume'] since 2017-08-17."""
