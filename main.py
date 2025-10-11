@@ -298,9 +298,7 @@ def main():
     print(f"  - {equity_filename}")
     print(f"  - {trades_filename}")
     
-    print("\nStarting web server to display results...")
-    import subprocess
-    subprocess.Popen(['python', 'web_server.py'])
+    return results_df, equity_df, trades_df
 
 if __name__ == "__main__":
     main()
