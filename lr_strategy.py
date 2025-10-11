@@ -85,8 +85,8 @@ pred25 = pred25[:min_len]
 
 capital = 1000.0
 buyhold = 1000.0
-lev     = 4.0                            # 4× leverage
-stop    = 0.45                           # 45 % stop-loss
+lev     = 1.0                            # 4× leverage
+stop    = 9.45                           # 45 % stop-loss
 
 pos     = 0
 entry_i = 0
