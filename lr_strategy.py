@@ -125,8 +125,8 @@ pred10 = pred10[:min_len]
 
 capital = 1000.0
 buyhold = 1000.0
-lev     = 3.0
-stop    = 0.80
+lev     = 1
+stop    = 9
 
 pos     = 0
 entry_i = 0
