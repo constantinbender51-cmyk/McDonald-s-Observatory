@@ -134,6 +134,7 @@ max_cap = capital
 worst_dd = 0.0
 
 print("date        6d%  10d%  pos  equity   buy&hold")
+results = []  # <-- NEW: collect rows for CSV
 for i in range(len(pct1d)):
     p6, p10 = pred6[i], pred10[i]
     new_pos = 0
@@ -163,8 +164,9 @@ for i in range(len(pct1d)):
     if dd < worst_dd:
         worst_dd = dd
 
-    print(f"{df['date'].iloc[first+i].strftime('%Y-%m-%d')}  "
-          f"{p6:5.1f}  {p10:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
+    date_str = df['date'].iloc[first+i].strftime('%Y-%m-%d')
+    print(f"{date_str}  {p6:5.1f}  {p10:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
+    results.append([date_str, p6, p10, pos, capital, buyhold])
     time.sleep(0.01)
 
 if pos != 0:
@@ -206,3 +208,19 @@ dir10_vs_1d = (np.sign(pred10) == np.sign(next_day_ret)).mean()
 print("\nUsing long-horizon forecast to guess T+1 direction")
 print(f"pred6  → next-day accuracy : {dir6_vs_1d:6.1%}")
 print(f"pred10 → next-day accuracy : {dir10_vs_1d:6.1%}")
+
+# --------------------------------------------------
+# 5.  WRITE CSV + START WEB SERVER
+# --------------------------------------------------
+csv_path = Path("results.csv")
+pd.DataFrame(results, columns=["date","pred6","pred10","pos","equity","buyhold"]).to_csv(csv_path, index=False)
+print(f"\nResults saved → {csv_path.resolve()}")
+
+# fire up the web-plotter
+import subprocess, webbrowser, time, os
+port = int(os.environ.get("PORT", 5000))
+proc = subprocess.Popen(["python", "webplot.py"], cwd=Path(__file__).parent)
+time.sleep(1.5)          # give Flask a moment to bind
+webbrowser.open(f"http://127.0.0.1:{port}/")
+print("Browser opened – Ctrl-C here to stop the server.")
+proc.wait()
