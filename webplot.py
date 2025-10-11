@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from flask import Flask, Response
 
 app = Flask(__name__)
-LOG_FILE = "log2.txt"   # <- same folder or absolute path
+LOG_FILE = "log3.txt"   # <- same folder or absolute path
 
 # ------------------------------------------------------------------
 # 1.  Parse the log once at start-up (cheap for a demo)
