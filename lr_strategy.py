@@ -137,3 +137,32 @@ print(f"\nFinal equity (3×) : {capital:8.2f}")
 print(f"Buy & hold        : {buyhold:8.2f}")
 print(f"Excess            : {capital - buyhold:8.2f}")
 print(f"Worst trade (%)   : {worst_dd:8.2f}")
+# --------------------------------------------------
+# 4.  ACCURACY & ERROR METRICS  (add after the loop)
+# --------------------------------------------------
+# realised 6-day and 10-day returns (already computed inside train_model)
+d = df.copy()
+d["y6"]  = (d["close"].shift(-6)  / d["close"] - 1) * 100
+d["y10"] = (d["close"].shift(-10) / d["close"] - 1) * 100
+d = d.iloc[split:split+min_len]          # same out-of-sample window
+
+# --- directional accuracy ---
+acc6  = (np.sign(d["y6"].values)  == np.sign(pred6)).mean()
+acc10 = (np.sign(d["y10"].values) == np.sign(pred10)).mean()
+
+# --- mean absolute error (MAE) ---
+mae6  = np.abs(d["y6"].values  - pred6).mean()
+mae10 = np.abs(d["y10"].values - pred10).mean()
+
+# --- mean squared error (MSE) ---
+mse6  = ((d["y6"].values  - pred6) ** 2).mean()
+mse10 = ((d["y10"].values - pred10) ** 2).mean()
+
+print("\nPrediction quality (out-of-sample)")
+print(f"6-day  directional accuracy : {acc6:6.1%}")
+print(f"10-day directional accuracy : {acc10:6.1%}")
+print(f"6-day  MAE                  : {mae6:6.2f}%")
+print(f"10-day MAE                  : {mae10:6.2f}%")
+print(f"6-day  MSE                  : {mse6:6.2f}")
+print(f"10-day MSE                  : {mse10:6.2f}")
+
