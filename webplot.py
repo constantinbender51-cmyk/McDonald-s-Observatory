@@ -4,6 +4,7 @@ matplotlib.use("Agg")          # headless
 import matplotlib.pyplot as plt
 from flask import Flask, Response
 from pathlib import Path
+import io
 
 app = Flask(__name__)
 CSV_FILE = Path(__file__).with_name("results.csv")
