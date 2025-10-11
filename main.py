@@ -139,11 +139,10 @@ def simulate_trading(df, model_6d, model_10d, scaler, feature_cols, test_idx, le
     
     pred_6d = model_6d.predict(X_test_scaled)
     pred_10d = model_10d.predict(X_test_scaled)
-    pred_6d_proba = model_6d.predict_proba(X_test_scaled)[:, 1]
     
     test_df['pred_6d'] = pred_6d
     test_df['pred_10d'] = pred_10d
-    test_df['pred_6d_proba'] = pred_6d_proba
+    test_df['pred_6d_pct'] = test_df['target_6d_pct']
     
     initial_capital = 10000
     cash = initial_capital
@@ -177,15 +176,7 @@ def simulate_trading(df, model_6d, model_10d, scaler, feature_cols, test_idx, le
                 pnl = position * (current_price - entry_price) * leverage
                 cash += pnl
                 trades.append({'entry_price': entry_price, 'exit_price': current_price, 
-                             'type': position_type, 'pnl': pnl, 'exit_reason': 'stop_loss'})
-                position = 0
-                position_type = None
-                continue
-            elif position_type == 'short' and current_price >= stop_loss:
-                pnl = position * (entry_price - current_price) * leverage
-                cash += pnl
-                trades.append({'entry_price': entry_price, 'exit_price': current_price, 
-                             'type': position_type, 'pnl': pnl, 'exit_reason': 'stop_loss'})
+                             'type': position_type, 'pnl': pnl})
                 position = 0
                 position_type = None
                 continue
