@@ -1,41 +1,17 @@
-import re
-import io
-import base64
-from datetime import datetime
-import os
-
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")          # headless
 import matplotlib.pyplot as plt
-from flask import Flask, Response
+from flask import Flask, Response, render_string
+from pathlib import Path
 
 app = Flask(__name__)
-LOG_FILE = "log5.txt"   # <- same folder or absolute path
+CSV_FILE = Path(__file__).with_name("results.csv")
 
 # ------------------------------------------------------------------
-# 1.  Parse the log once at start-up (cheap for a demo)
+# 1.  Read the CSV
 # ------------------------------------------------------------------
-def parse_log(path):
-    rows = []
-    with open(path) as fh:
-        for line in fh:
-            # 2025-10-11T14:42:04.446080053Z [inf]  2024-02-07    1.2   -0.1    0   1000.00    953.24
-            m = re.search(r"(\d{4}-\d{2}-\d{2})\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)", line)
-            if not m:
-                continue
-            date, p6, p10, pos, eq, bh = m.groups()
-            rows.append({
-                "date": datetime.strptime(date, "%Y-%m-%d"),
-                "pred6": float(p6),
-                "pred10": float(p10),
-                "pos": int(float(pos)),
-                "equity": float(eq),
-                "buyhold": float(bh)
-            })
-    return pd.DataFrame(rows).set_index("date")
-
-DF = parse_log(LOG_FILE)
+DF = pd.read_csv(CSV_FILE, parse_dates=["date"]).set_index("date")
 
 # ------------------------------------------------------------------
 # 2.  Build the figure
@@ -61,7 +37,8 @@ def build_plot():
     ax.grid(True, ls="--", lw=.5)
 
     # return PNG bytes
-    buf = io.BytesIO()
+    from io import BytesIO
+    buf = BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", dpi=120)
     plt.close(fig)
     buf.seek(0)
@@ -76,9 +53,9 @@ def chart():
     return Response(png, mimetype="image/png")
 
 # ------------------------------------------------------------------
-# 4.  Railway entry-point
+# 4.  Entry-point
 # ------------------------------------------------------------------
 if __name__ == "__main__":
-    # Railway injects PORT env-var
+    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
