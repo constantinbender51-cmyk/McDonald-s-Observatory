@@ -34,8 +34,8 @@ def build_plot():
     # ------------------------------------------------------------------
     idx0   = DF.index[0]
     eq0    = DF.loc[idx0, 'equity']          # first equity value
-    scale6 = eq0 / 100                       # 1 %  → 1 scale-unit
-    scale10= eq0 / 100
+    scale6 = 2500 / 100                       # 1 %  → 1 scale-unit
+    scale10= 2500 / 100
 
     # convert % forecasts to “indexed” capital lines
     pred6_scaled  = eq0 + DF.pred6  * scale6
