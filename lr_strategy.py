@@ -1,11 +1,11 @@
 # --------------------------------------------------
 # CONFIGURATION PARAMETERS
 # --------------------------------------------------
-LOOKBACK = 15           # Number of historical days for features
-SHORT_HORIZON = 7       # Days ahead for short-term prediction
-LONG_HORIZON = 25       # Days ahead for long-term prediction
-LEVERAGE = 4.0          # Position leverage multiplier
-STOP_LOSS_PCT = 0.45    # Stop loss as % of predicted move (0.45 = 45%)
+LOOKBACK = 10           # Number of historical days for features
+SHORT_HORIZON = 6       # Days ahead for short-term prediction
+LONG_HORIZON = 10       # Days ahead for long-term prediction
+LEVERAGE = 3.0          # Position leverage multiplier
+STOP_LOSS_PCT = 0.8    # Stop loss as % of predicted move (0.45 = 45%)
 INITIAL_CAPITAL = 1000.0
 
 # --------------------------------------------------
