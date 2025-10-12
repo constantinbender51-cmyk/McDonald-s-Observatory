@@ -9,14 +9,14 @@ STOP_LOSS_PCT = 0.45    # Stop loss as % of predicted move (0.45 = 45%)
 INITIAL_CAPITAL = 1000.0
 
 # --------------------------------------------------
-# 0.  FETCH FULL ETH DAILY HISTORY FROM BINANCE
+# 0.  FETCH FULL BTC DAILY HISTORY FROM BINANCE
 # --------------------------------------------------
 import requests, math, time, pandas as pd, numpy as np
 from pathlib import Path
 
-BINANCE_CSV = Path("xrp_daily_bin.csv")
+BINANCE_CSV = Path("btc_daily_bin.csv")
 
-def fetch_binance_daily(symbol="XRPUSDT"):
+def fetch_binance_daily(symbol="BTCUSDT"):
     """Return a DataFrame with columns ['date', 'close', 'volume'] since 2017-08-17."""
     if BINANCE_CSV.exists():
         print("Loading cached", BINANCE_CSV)
