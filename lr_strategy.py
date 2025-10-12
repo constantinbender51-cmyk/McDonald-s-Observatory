@@ -14,9 +14,9 @@ INITIAL_CAPITAL = 1000.0
 import requests, math, time, pandas as pd, numpy as np
 from pathlib import Path
 
-BINANCE_CSV = Path("eth_daily_bin.csv")
+BINANCE_CSV = Path("xrp_daily_bin.csv")
 
-def fetch_binance_daily(symbol="ETHUSDT"):
+def fetch_binance_daily(symbol="XRPUSDT"):
     """Return a DataFrame with columns ['date', 'close', 'volume'] since 2017-08-17."""
     if BINANCE_CSV.exists():
         print("Loading cached", BINANCE_CSV)
