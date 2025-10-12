@@ -4,11 +4,13 @@
 LOOKBACK = 10           # Number of historical days for features
 SHORT_HORIZON = 6       # Days ahead for short-term prediction
 LONG_HORIZON = 10       # Days ahead for long-term prediction
-SHIFT_VARIABLE = 3      # How many days ahead to use predictions from
-THRESHOLD = 1.0         # Prediction threshold (%) for taking positions
 LEVERAGE = 3.0          # Position leverage multiplier
-STOP_LOSS_PCT = 0.8    # Stop loss as % of predicted move (0.45 = 45%)
+STOP_LOSS_PCT = 0.8     # Stop loss as % of predicted move
 INITIAL_CAPITAL = 1000.0
+
+# GRID SEARCH PARAMETERS
+THRESHOLD_VALUES = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+SHIFT_VALUES = [1, 2, 3, 4, 5, 6]
 
 # --------------------------------------------------
 # 0.  FETCH FULL BTC DAILY HISTORY FROM BINANCE
@@ -26,9 +28,9 @@ def fetch_binance_daily(symbol="BTCUSDT"):
 
     print("Downloading full daily history from Binance …")
     root = "https://api.binance.com/api/v3/klines"
-    limit = 1000                       # max per call
+    limit = 1000
     interval = "1d"
-    start_time = 1502928000000         # 2017-08-17 00:00 UTC
+    start_time = 1502928000000
     end_time   = int(time.time()*1000)
     data = []
 
@@ -41,8 +43,8 @@ def fetch_binance_daily(symbol="BTCUSDT"):
         if not batch:
             break
         data.extend(batch)
-        start_time = batch[-1][6] + 1   # next call starts after last close time
-        time.sleep(0.2)                 # be polite
+        start_time = batch[-1][6] + 1
+        time.sleep(0.2)
 
     df = (pd.DataFrame(data,
                        columns="open_time o h l c v close_time qav n taker_base_qav taker_quote_qav ignore".split())
@@ -59,6 +61,7 @@ def fetch_binance_daily(symbol="BTCUSDT"):
 
 df = fetch_binance_daily()
 close = df["close"].values
+
 # --------------------------------------------------
 # 1.  FEATURES + STANDARDISATION
 # --------------------------------------------------
@@ -113,6 +116,7 @@ class LinReg:
         return Xb @ self.theta
 
 # ---------- 2.  TRAIN SHORT & LONG HORIZON MODELS ----------
+print("Training models...")
 def train_model(horizon):
     d = df.copy()
     d["y"] = (d["close"].shift(-horizon) / d["close"] - 1) * 100
@@ -127,140 +131,284 @@ def train_model(horizon):
 pred_short_raw = train_model(SHORT_HORIZON)
 pred_long_raw  = train_model(LONG_HORIZON)
 
-# ----------  3.  SHIFT PREDICTIONS & TRADE  ----------
+# ----------  3.  GRID SEARCH OVER PARAMETERS  ----------
 first = split
+lev = LEVERAGE
+stop = STOP_LOSS_PCT
 
-# Calculate shifts
-short_shift = SHORT_HORIZON - SHIFT_VARIABLE
-long_shift = LONG_HORIZON - SHIFT_VARIABLE
+print(f"\n{'='*80}")
+print(f"GRID SEARCH: Testing {len(THRESHOLD_VALUES)} thresholds × {len(SHIFT_VALUES)} shifts = {len(THRESHOLD_VALUES)*len(SHIFT_VALUES)} combinations")
+print(f"{'='*80}\n")
 
-print(f"\n{'='*70}")
-print(f"STRATEGY CONFIGURATION")
-print(f"{'='*70}")
-print(f"Short horizon: {SHORT_HORIZON} days | Shift back: {short_shift} days")
-print(f"Long horizon:  {LONG_HORIZON} days  | Shift back: {long_shift} days")
-print(f"Threshold:     ±{THRESHOLD}%")
-print(f"Position logic: Both > threshold → LONG | Both < -threshold → SHORT | Else → HOLD")
-print(f"{'='*70}\n")
+grid_results = []
 
-# Shift predictions backward
+for shift_var in SHIFT_VALUES:
+    # Calculate shifts for this iteration
+    short_shift = SHORT_HORIZON - shift_var
+    long_shift = LONG_HORIZON - shift_var
+    
+    # Skip if shifts are invalid
+    if short_shift < 0 or long_shift < 0:
+        continue
+    
+    # Shift predictions backward
+    pred_short = np.concatenate([pred_short_raw[short_shift:], np.full(short_shift, np.nan)])
+    pred_long = np.concatenate([pred_long_raw[long_shift:], np.full(long_shift, np.nan)])
+    
+    # Find valid range
+    min_len = min(len(pred_short), len(pred_long))
+    valid_mask = ~(np.isnan(pred_short[:min_len]) | np.isnan(pred_long[:min_len]))
+    min_len = np.sum(valid_mask)
+    
+    pred_short_valid = pred_short[valid_mask]
+    pred_long_valid = pred_long[valid_mask]
+    pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
+    
+    for threshold in THRESHOLD_VALUES:
+        capital = INITIAL_CAPITAL
+        buyhold = INITIAL_CAPITAL
+        pos = 0
+        entry_i = 0
+        entry_pred = 0
+        max_cap = capital
+        worst_dd = 0.0
+        num_trades = 0
+        
+        for i in range(len(pct1d)):
+            ps, pl = pred_short_valid[i], pred_long_valid[i]
+            
+            # Strategy logic
+            new_pos = 0
+            if ps > threshold and pl > threshold:
+                new_pos = 1
+            elif ps < -threshold and pl < -threshold:
+                new_pos = -1
+            
+            # Stop loss
+            if pos != 0:
+                realised = (close[first+i] / close[first+entry_i] - 1) * 100 * pos
+                if realised <= -stop * abs(entry_pred):
+                    new_pos = 0
+            
+            # Execute trade
+            if new_pos != pos:
+                if pos != 0:
+                    gross = 1 + (close[first+i] / close[first+entry_i] - 1) * lev * pos
+                    capital *= gross
+                    num_trades += 1
+                if new_pos != 0:
+                    entry_i = i
+                    entry_pred = ps if new_pos == 1 else -ps
+                pos = new_pos
+            
+            buyhold *= 1 + pct1d[i]
+            
+            if capital > max_cap:
+                max_cap = capital
+            dd = (capital - max_cap) / max_cap * 100
+            if dd < worst_dd:
+                worst_dd = dd
+        
+        # Close final position
+        if pos != 0:
+            gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
+            capital *= gross
+            num_trades += 1
+        
+        # Calculate metrics
+        total_return = (capital - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
+        excess_return = capital - buyhold
+        sharpe = total_return / abs(worst_dd) if worst_dd != 0 else 0
+        
+        grid_results.append({
+            'shift': shift_var,
+            'threshold': threshold,
+            'final_equity': capital,
+            'buyhold': buyhold,
+            'total_return_%': total_return,
+            'excess_return': excess_return,
+            'worst_dd_%': worst_dd,
+            'sharpe': sharpe,
+            'num_trades': num_trades
+        })
+
+# --------------------------------------------------
+# 4.  PRINT TOP 5 BY SHARPE RATIO
+# --------------------------------------------------
+results_df = pd.DataFrame(grid_results)
+
+print(f"\n{'='*80}")
+print("TOP 5 CONFIGURATIONS BY SHARPE RATIO (Return/MaxDD)")
+print(f"{'='*80}")
+top5_sharpe = results_df.nlargest(5, 'sharpe')
+print(top5_sharpe.to_string(index=False))
+
+# Get the best configuration by Sharpe ratio
+best_config = top5_sharpe.iloc[0]
+print(f"\n{'='*80}")
+print("BEST CONFIGURATION (by Sharpe ratio) - SELECTED FOR RESULTS")
+print(f"{'='*80}")
+print(f"Shift variable:    {best_config['shift']}")
+print(f"Threshold:         {best_config['threshold']:.1f}%")
+print(f"Final equity:      ${best_config['final_equity']:.2f}")
+print(f"Buy & hold:        ${best_config['buyhold']:.2f}")
+print(f"Total return:      {best_config['total_return_%']:+.1f}%")
+print(f"Excess return:     ${best_config['excess_return']:.2f}")
+print(f"Worst drawdown:    {best_config['worst_dd_%']:.1f}%")
+print(f"Sharpe ratio:      {best_config['sharpe']:.2f}")
+print(f"Number of trades:  {best_config['num_trades']}")
+
+# --------------------------------------------------
+# 5.  RE-RUN BEST STRATEGY TO GENERATE DETAILED RESULTS
+# --------------------------------------------------
+print(f"\n{'='*80}")
+print("GENERATING DETAILED RESULTS FOR BEST CONFIGURATION")
+print(f"{'='*80}\n")
+
+best_shift = int(best_config['shift'])
+best_threshold = best_config['threshold']
+
+# Recalculate with best parameters to get daily details
+short_shift = SHORT_HORIZON - best_shift
+long_shift = LONG_HORIZON - best_shift
+
 pred_short = np.concatenate([pred_short_raw[short_shift:], np.full(short_shift, np.nan)])
 pred_long = np.concatenate([pred_long_raw[long_shift:], np.full(long_shift, np.nan)])
 
-# Find valid range
 min_len = min(len(pred_short), len(pred_long))
 valid_mask = ~(np.isnan(pred_short[:min_len]) | np.isnan(pred_long[:min_len]))
 min_len = np.sum(valid_mask)
 
-pred_short = pred_short[valid_mask]
-pred_long = pred_long[valid_mask]
-
+pred_short_valid = pred_short[valid_mask]
+pred_long_valid = pred_long[valid_mask]
 pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
 
+# Get dates for results
+dates = df['date'].values[first:first+min_len]
+
+# Run strategy with detailed logging
 capital = INITIAL_CAPITAL
 buyhold = INITIAL_CAPITAL
-lev     = LEVERAGE
-stop    = STOP_LOSS_PCT
-threshold = THRESHOLD
-
-pos     = 0
+pos = 0
 entry_i = 0
 entry_pred = 0
 max_cap = capital
 worst_dd = 0.0
+num_trades = 0
 
-print(f"date        {SHIFT_VARIABLE}dS%  {SHIFT_VARIABLE}dL%  pos  equity   buy&hold")
-results = []
+daily_results = []
+
 for i in range(len(pct1d)):
-    ps, pl = pred_short[i], pred_long[i]
+    ps, pl = pred_short_valid[i], pred_long_valid[i]
     
-    # NEW STRATEGY LOGIC
+    # Strategy logic
     new_pos = 0
-    if ps > threshold and pl > threshold:
-        new_pos = 1   # Both bullish → LONG
-    elif ps < -threshold and pl < -threshold:
-        new_pos = -1  # Both bearish → SHORT
-    # else: new_pos = 0 (HOLD when they disagree)
-
-    # Stop loss check
+    if ps > best_threshold and pl > best_threshold:
+        new_pos = 1
+    elif ps < -best_threshold and pl < -best_threshold:
+        new_pos = -1
+    
+    # Stop loss
     if pos != 0:
         realised = (close[first+i] / close[first+entry_i] - 1) * 100 * pos
         if realised <= -stop * abs(entry_pred):
             new_pos = 0
-
+    
     # Execute trade
+    trade_return = 0
     if new_pos != pos:
         if pos != 0:
             gross = 1 + (close[first+i] / close[first+entry_i] - 1) * lev * pos
+            trade_return = (gross - 1) * capital
             capital *= gross
+            num_trades += 1
         if new_pos != 0:
             entry_i = i
-            entry_pred = ps if new_pos == 1 else -ps  # Store entry prediction
+            entry_pred = ps if new_pos == 1 else -ps
         pos = new_pos
-
+    
     buyhold *= 1 + pct1d[i]
-
+    
     if capital > max_cap:
         max_cap = capital
     dd = (capital - max_cap) / max_cap * 100
     if dd < worst_dd:
         worst_dd = dd
-
-    date_str = df['date'].iloc[first+i].strftime('%Y-%m-%d')
-    print(f"{date_str}  {ps:5.1f}  {pl:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
-    results.append([date_str, ps, pl, pos, capital, buyhold])
-    time.sleep(0.01)
+    
+    daily_results.append({
+        'date': dates[i],
+        'btc_price': close[first+i],
+        'position': pos,
+        'pred_short': ps,
+        'pred_long': pl,
+        'equity': capital,
+        'buyhold_equity': buyhold,
+        'drawdown_%': dd,
+        'trade_return': trade_return
+    })
 
 # Close final position
 if pos != 0:
     gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
     capital *= gross
-
-print(f"\nFinal equity ({LEVERAGE}×) : {capital:8.2f}")
-print(f"Buy & hold        : {buyhold:8.2f}")
-print(f"Excess            : {capital - buyhold:8.2f}")
-print(f"Worst drawdown (%) : {worst_dd:8.2f}")
+    num_trades += 1
 
 # --------------------------------------------------
-# 4.  ACCURACY METRICS FOR SHIFT_VARIABLE DAY AHEAD
+# 6.  SAVE RESULTS.CSV
 # --------------------------------------------------
-d = df.copy()
-d["y_shift"] = (d["close"].shift(-SHIFT_VARIABLE) / d["close"] - 1) * 100
-d = d.iloc[split:split+min_len]
-
-# Use the shifted predictions to evaluate
-acc_short = (np.sign(d["y_shift"].values) == np.sign(pred_short)).mean()
-acc_long  = (np.sign(d["y_shift"].values) == np.sign(pred_long)).mean()
-mae_short = np.abs(d["y_shift"].values - pred_short).mean()
-mae_long  = np.abs(d["y_shift"].values - pred_long).mean()
-mse_short = ((d["y_shift"].values - pred_short) ** 2).mean()
-mse_long  = ((d["y_shift"].values - pred_long) ** 2).mean()
-
-print("\n" + "="*70)
-print(f"PREDICTION QUALITY ({SHIFT_VARIABLE}-day ahead, out-of-sample)")
-print("="*70)
-print(f"Short model directional accuracy : {acc_short:6.1%}")
-print(f"Long model directional accuracy  : {acc_long:6.1%}")
-print(f"Short model MAE                  : {mae_short:6.2f}%")
-print(f"Long model MAE                   : {mae_long:6.2f}%")
-print(f"Short model MSE                  : {mse_short:6.2f}")
-print(f"Long model MSE                   : {mse_long:6.2f}")
+results_csv_df = pd.DataFrame(daily_results)
+results_csv_path = Path("results.csv")
+results_csv_df.to_csv(results_csv_path, index=False)
+print(f"Detailed results saved → {results_csv_path.resolve()}")
+print(f"Contains {len(results_csv_df)} daily records\n")
 
 # --------------------------------------------------
-# 5.  WRITE CSV + START WEB SERVER
+# 7.  SAVE METRICS
 # --------------------------------------------------
-csv_path = Path("results.csv")
+total_return = (capital - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
+excess_return = capital - buyhold
+sharpe = total_return / abs(worst_dd) if worst_dd != 0 else 0
 
-results_df = pd.DataFrame(results, 
-             columns=["date","pred_short","pred_long","pos","equity","buyhold"])
-results_df.to_csv(csv_path, index=False)
-print(f"\nResults saved → {csv_path.resolve()}")
+metrics = {
+    'configuration': {
+        'shift': best_shift,
+        'threshold': best_threshold,
+        'leverage': LEVERAGE,
+        'stop_loss_pct': STOP_LOSS_PCT,
+        'initial_capital': INITIAL_CAPITAL,
+        'lookback': LOOKBACK,
+        'short_horizon': SHORT_HORIZON,
+        'long_horizon': LONG_HORIZON
+    },
+    'performance': {
+        'final_equity': capital,
+        'buyhold_equity': buyhold,
+        'total_return_%': total_return,
+        'excess_return': excess_return,
+        'worst_drawdown_%': worst_dd,
+        'sharpe_ratio': sharpe,
+        'number_of_trades': num_trades
+    },
+    'comparison_to_buyhold': {
+        'outperformance': capital > buyhold,
+        'outperformance_amount': excess_return,
+        'outperformance_%': (capital / buyhold - 1) * 100
+    }
+}
 
-# fire up the web-plotter
-import subprocess, webbrowser, time, os
-port = int(os.environ.get("PORT", 5000))
-proc = subprocess.Popen(["python", "webplot.py"], cwd=Path(__file__).parent)
-time.sleep(1.5)          # give Flask a moment to bind
-webbrowser.open(f"http://127.0.0.1:{port}/")
-print("Browser opened – Ctrl-C here to stop the server.")
-proc.wait()
+import json
+metrics_path = Path("metrics.json")
+with open(metrics_path, 'w') as f:
+    json.dump(metrics, f, indent=2)
+print(f"Metrics saved → {metrics_path.resolve()}")
+
+print(f"\n{'='*80}")
+print("SUMMARY")
+print(f"{'='*80}")
+print(f"✓ Best configuration identified (Shift={best_shift}, Threshold={best_threshold:.1f}%)")
+print(f"✓ Sharpe Ratio: {sharpe:.2f}")
+print(f"✓ Final Equity: ${capital:.2f}")
+print(f"✓ Total Return: {total_return:+.1f}%")
+print(f"✓ Results saved to: results.csv ({len(results_csv_df)} rows)")
+print(f"✓ Metrics saved to: metrics.json")
+print(f"{'='*80}\n")
