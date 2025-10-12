@@ -270,17 +270,16 @@ print(f"Worst drawdown (%) : {worst_dd:8.2f}")
 # --------------------------------------------------
 # 4.  ACCURACY METRICS FOR SHIFT_VARIABLE DAY AHEAD
 # --------------------------------------------------
-d = df.copy()
-d["y_shift"] = (d["close"].shift(-SHIFT_VARIABLE) / d["close"] - 1) * 100
-d = d.iloc[split:split+min_len]
+# --- labels must match the *exact* days we traded ----------
+y_true = df["close"].shift(-SHIFT_VARIABLE).pct_change().values[first:first+len(pct1d)] * 100
+y_true = y_true[mask[:len(y_true)]]          # same mask as predictions
 
-# Use the shifted predictions to evaluate
-acc_short = (np.sign(d["y_shift"].values) == np.sign(pred_short)).mean()
-acc_long  = (np.sign(d["y_shift"].values) == np.sign(pred_long)).mean()
-mae_short = np.abs(d["y_shift"].values - pred_short).mean()
-mae_long  = np.abs(d["y_shift"].values - pred_long).mean()
-mse_short = ((d["y_shift"].values - pred_short) ** 2).mean()
-mse_long  = ((d["y_shift"].values - pred_long) ** 2).mean()
+acc_short = (np.sign(y_true) == np.sign(pred_short)).mean()
+acc_long  = (np.sign(y_true) == np.sign(pred_long)).mean()
+mae_short = np.abs(y_true - pred_short).mean()
+mae_long  = np.abs(y_true - pred_long).mean()
+mse_short = ((y_true - pred_short) ** 2).mean()
+mse_long  = ((y_true - pred_long) ** 2).mean()
 
 print("\n" + "="*70)
 print(f"PREDICTION QUALITY ({SHIFT_VARIABLE}-day ahead, out-of-sample)")
