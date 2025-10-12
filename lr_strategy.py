@@ -188,6 +188,7 @@ for i in range(len(pct1d)):
     date_str = df['date'].iloc[first+i].strftime('%Y-%m-%d')
     print(f"{date_str}  {p6:5.1f}  {p10:5.1f}  {deriv:5.2f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
     results.append([date_str, p6, p10, deriv, pos, capital, buyhold])
+    time.sleep(0.01)
 
 # final exit if still in trade
 if pos != 0:
@@ -198,7 +199,6 @@ print(f"\nFinal equity (3×) : {capital:8.2f}")
 print(f"Buy & hold        : {buyhold:8.2f}")
 print(f"Excess            : {capital - buyhold:8.2f}")
 print(f"Worst trade (%)   : {worst_dd:8.2f}")
-time.sleep(0.01)
 
 # --------------------------------------------------
 # 6.  WRITE CSV + START WEB SERVER  (same as before)
