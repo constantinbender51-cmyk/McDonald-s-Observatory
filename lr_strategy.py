@@ -201,22 +201,118 @@ print(f"10-day MAE                  : {mae10:6.2f}%")
 print(f"6-day  MSE                  : {mse6:6.2f}")
 print(f"10-day MSE                  : {mse10:6.2f}")
 
-next_day_ret = (close[first+1:first+min_len+1] / close[first:first+min_len] - 1) * 100
-dir6_vs_1d  = (np.sign(pred6)  == np.sign(next_day_ret)).mean()
-dir10_vs_1d = (np.sign(pred10) == np.sign(next_day_ret)).mean()
+# --------------------------------------------------
+# 5.  MULTI-DAY PREDICTION ANALYSIS (NEW!)
+# --------------------------------------------------
+print("\n" + "="*70)
+print("MULTI-DAY PREDICTION ACCURACY ANALYSIS")
+print("="*70)
+print("\nTesting which future day (1-10) each predictor best forecasts:")
 
-print("\nUsing long-horizon forecast to guess T+1 direction")
-print(f"pred6  → next-day accuracy : {dir6_vs_1d:6.1%}")
-print(f"pred10 → next-day accuracy : {dir10_vs_1d:6.1%}")
+# Calculate actual returns for days 1-10 ahead
+actual_returns = {}
+for days_ahead in range(1, 11):
+    if first + min_len + days_ahead <= len(close):
+        actual_returns[days_ahead] = (close[first+days_ahead : first+min_len+days_ahead] / 
+                                     close[first : first+min_len] - 1) * 100
+    else:
+        # Handle edge case where we don't have enough future data
+        available = len(close) - first - days_ahead
+        if available > 0:
+            actual_returns[days_ahead] = (close[first+days_ahead : len(close)] / 
+                                         close[first : first+min_len] - 1) * 100
+            actual_returns[days_ahead] = np.concatenate([
+                actual_returns[days_ahead], 
+                np.full(min_len - available, np.nan)
+            ])
+        else:
+            actual_returns[days_ahead] = np.full(min_len, np.nan)
+
+# Test pred6 against each horizon
+print("\n--- PRED6 (trained on 6-day horizon) ---")
+print(f"{'Days':<6} {'Dir.Acc':<10} {'MAE':<10} {'MSE':<10} {'Corr':<10}")
+print("-" * 50)
+
+pred6_results = {}
+for days_ahead in range(1, 11):
+    actual = actual_returns[days_ahead]
+    valid_mask = ~np.isnan(actual)
+    
+    if valid_mask.sum() > 0:
+        actual_valid = actual[valid_mask]
+        pred_valid = pred6[valid_mask]
+        
+        dir_acc = (np.sign(actual_valid) == np.sign(pred_valid)).mean()
+        mae = np.abs(actual_valid - pred_valid).mean()
+        mse = ((actual_valid - pred_valid) ** 2).mean()
+        corr = np.corrcoef(actual_valid, pred_valid)[0, 1]
+        
+        pred6_results[days_ahead] = {
+            'dir_acc': dir_acc,
+            'mae': mae,
+            'mse': mse,
+            'corr': corr
+        }
+        
+        print(f"{days_ahead:<6} {dir_acc:>8.1%}  {mae:>8.2f}%  {mse:>8.2f}  {corr:>8.3f}")
+
+# Test pred10 against each horizon
+print("\n--- PRED10 (trained on 10-day horizon) ---")
+print(f"{'Days':<6} {'Dir.Acc':<10} {'MAE':<10} {'MSE':<10} {'Corr':<10}")
+print("-" * 50)
+
+pred10_results = {}
+for days_ahead in range(1, 11):
+    actual = actual_returns[days_ahead]
+    valid_mask = ~np.isnan(actual)
+    
+    if valid_mask.sum() > 0:
+        actual_valid = actual[valid_mask]
+        pred_valid = pred10[valid_mask]
+        
+        dir_acc = (np.sign(actual_valid) == np.sign(pred_valid)).mean()
+        mae = np.abs(actual_valid - pred_valid).mean()
+        mse = ((actual_valid - pred_valid) ** 2).mean()
+        corr = np.corrcoef(actual_valid, pred_valid)[0, 1]
+        
+        pred10_results[days_ahead] = {
+            'dir_acc': dir_acc,
+            'mae': mae,
+            'mse': mse,
+            'corr': corr
+        }
+        
+        print(f"{days_ahead:<6} {dir_acc:>8.1%}  {mae:>8.2f}%  {mse:>8.2f}  {corr:>8.3f}")
+
+# Find best performing horizons
+print("\n" + "="*70)
+print("BEST PREDICTION HORIZONS")
+print("="*70)
+
+best_pred6_dir = max(pred6_results.items(), key=lambda x: x[1]['dir_acc'])
+best_pred6_mae = min(pred6_results.items(), key=lambda x: x[1]['mae'])
+best_pred6_corr = max(pred6_results.items(), key=lambda x: x[1]['corr'])
+
+best_pred10_dir = max(pred10_results.items(), key=lambda x: x[1]['dir_acc'])
+best_pred10_mae = min(pred10_results.items(), key=lambda x: x[1]['mae'])
+best_pred10_corr = max(pred10_results.items(), key=lambda x: x[1]['corr'])
+
+print("\nPRED6 (trained on 6-day):")
+print(f"  Best directional accuracy: Day {best_pred6_dir[0]} ({best_pred6_dir[1]['dir_acc']:.1%})")
+print(f"  Best MAE (magnitude):      Day {best_pred6_mae[0]} ({best_pred6_mae[1]['mae']:.2f}%)")
+print(f"  Best correlation:          Day {best_pred6_corr[0]} ({best_pred6_corr[1]['corr']:.3f})")
+
+print("\nPRED10 (trained on 10-day):")
+print(f"  Best directional accuracy: Day {best_pred10_dir[0]} ({best_pred10_dir[1]['dir_acc']:.1%})")
+print(f"  Best MAE (magnitude):      Day {best_pred10_mae[0]} ({best_pred10_mae[1]['mae']:.2f}%)")
+print(f"  Best correlation:          Day {best_pred10_corr[0]} ({best_pred10_corr[1]['corr']:.3f})")
 
 # --------------------------------------------------
-# 5.  WRITE CSV + START WEB SERVER
+# 6.  WRITE CSV + START WEB SERVER
 # --------------------------------------------------
 csv_path = Path("results.csv")
 
 # Create results with proper date alignment
-# pred6[i] forecasts 6 days ahead, so it should be plotted at date[first+i+6]
-# pred10[i] forecasts 10 days ahead, so it should be plotted at date[first+i+10]
 results_fixed = []
 for i in range(len(results)):
     date_str = results[i][0]
@@ -240,6 +336,7 @@ pd.DataFrame(results_fixed,
              columns=["date","date_pred6","date_pred10","pred6","pred10","pos","equity","buyhold"]
             ).to_csv(csv_path, index=False)
 print(f"\nResults saved → {csv_path.resolve()}")
+
 # fire up the web-plotter
 import subprocess, webbrowser, time, os
 port = int(os.environ.get("PORT", 5000))
