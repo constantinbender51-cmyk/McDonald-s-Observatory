@@ -143,41 +143,55 @@ print(f"Threshold:     ±{THRESHOLD}%")
 print(f"Position logic: Both > threshold → LONG | Both < -threshold → SHORT | Else → HOLD")
 print(f"{'='*70}\n")
 
-# ----------  3.  SHIFT PREDICTIONS & TRADE  ----------
+# ----------------------------------------------------------
+# 3.  ALIGN EVERYTHING TO THE SAME OUT-OF-SAMPLE LENGTH
+# ----------------------------------------------------------
 first = split
+n_rows = len(df) - first - 1          # we need t+1 to compute pct1d
 
-# --- raw predictions already aligned to df[split:] ----------
-short_raw = pred_short_raw
-long_raw  = pred_long_raw
+# --- truncate raw predictions to identical length ----------
+pred_short_raw = pred_short_raw[:n_rows]
+pred_long_raw  = pred_long_raw [:n_rows]
 
-# --- how many future rows we actually have ----------
-max_trade_rows = len(df) - first - 1          # we need t+1 to compute pct1d
+# --- build returns vector ----------
+close_seg = close[first : first + n_rows + 1]
+pct1d = close_seg[1:] / close_seg[:-1] - 1          # length = n_rows - 1
 
-# --- truncate everything to that length ----------
-short_raw = short_raw[:max_trade_rows]
-long_raw  = long_raw [:max_trade_rows]
-close_slice = close[first : first + max_trade_rows + 1]   # +1 for pct1d
+# --- horizon shift for *trading* signal ----------
+sh_short = SHORT_HORIZON - SHIFT_VARIABLE
+sh_long  = LONG_HORIZON  - SHIFT_VARIABLE
 
-# --- build pct1d ---
-pct1d = (close_slice[1:] / close_slice[:-1] - 1)
+# --- shift backwards, pad with NaN at the end ----------
+pred_short = np.full(n_rows, np.nan)
+pred_long  = np.full(n_rows, np.nan)
 
-# --- now apply the horizon shift for *trading* signals ----------
-short_shift = SHORT_HORIZON - SHIFT_VARIABLE
-long_shift  = LONG_HORIZON  - SHIFT_VARIABLE
+pred_short[:-sh_short] = pred_short_raw[sh_short:]
+pred_long [:-sh_long]  = pred_long_raw [sh_long:]
 
-# pad with NaNs at the end so that the signal lines up with the day it is acted on
-pred_short = np.full(len(short_raw), np.nan)
-pred_long  = np.full(len(long_raw),  np.nan)
+# --- final mask: both forecasts finite ----------
+mask = ~(np.isnan(pred_short) | np.isnan(pred_long))
+pred_short = pred_short[mask]
+pred_long  = pred_long [mask]
+pct1d      = pct1d     [mask[:len(pct1d)]]  # pct1d is 1 shorter, slice it
 
-pred_short[:-short_shift] = short_raw[short_shift:]
-pred_long [:-long_shift]  = long_raw [long_shift:]
+# --- ready to loop ----------
+capital = INITIAL_CAPITAL
+buyhold = INITIAL_CAPITAL
+lev     = LEVERAGE
+stop    = STOP_LOSS_PCT
+threshold = THRESHOLD
 
-# --- common mask: both predictions finite ----------
-valid_mask = ~(np.isnan(pred_short) | np.isnan(pred_long))
-pred_short = pred_short[valid_mask]
-pred_long  = pred_long [valid_mask]
-pct1d      = pct1d[valid_mask]
+pos = 0
+entry_i = 0
+entry_pred = 0
+max_cap = capital
+worst_dd = 0.0
 
+print(f"date        {SHIFT_VARIABLE}dS%  {SHIFT_VARIABLE}dL%  pos  equity   buy&hold")
+results = []
+for i in range(len(pct1d)):
+    ps, pl = pred_short[i], pred_long[i]
+    ...
 
 capital = INITIAL_CAPITAL
 buyhold = INITIAL_CAPITAL
