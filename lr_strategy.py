@@ -153,6 +153,13 @@ n_rows = len(df) - first - 1          # we need t+1 to compute pct1d
 pred_short_raw = pred_short_raw[:n_rows]
 pred_long_raw  = pred_long_raw [:n_rows]
 
+# --- quick alignment: whoever is longer loses the last element ----------
+if len(pred_short_raw) != len(pred_long_raw):
+    min_len = min(len(pred_short_raw), len(pred_long_raw))
+    pred_short_raw = pred_short_raw[:min_len]
+    pred_long_raw  = pred_long_raw [:min_len]
+    
+
 # --- build returns vector ----------
 close_seg = close[first : first + n_rows + 1]
 pct1d = close_seg[1:] / close_seg[:-1] - 1          # length = n_rows - 1
