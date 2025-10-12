@@ -1,4 +1,14 @@
 # --------------------------------------------------
+# CONFIGURATION PARAMETERS
+# --------------------------------------------------
+LOOKBACK = 15           # Number of historical days for features
+SHORT_HORIZON = 7       # Days ahead for short-term prediction
+LONG_HORIZON = 25       # Days ahead for long-term prediction
+LEVERAGE = 4.0          # Position leverage multiplier
+STOP_LOSS_PCT = 0.45    # Stop loss as % of predicted move (0.45 = 45%)
+INITIAL_CAPITAL = 1000.0
+
+# --------------------------------------------------
 # 0.  FETCH FULL BTC DAILY HISTORY FROM BINANCE
 # --------------------------------------------------
 import requests, math, time, pandas as pd, numpy as np
@@ -48,9 +58,9 @@ def fetch_binance_daily(symbol="BTCUSDT"):
 df = fetch_binance_daily()
 close = df["close"].values
 # --------------------------------------------------
-# 1.  FEATURES + STANDARDISATION  (your code below)
+# 1.  FEATURES + STANDARDISATION
 # --------------------------------------------------
-lookback = 15
+lookback = LOOKBACK
 stoch_cols = [f"stoch_{i}" for i in range(lookback)]
 pct_cols   = [f"pct_{i}"   for i in range(lookback)]
 vol_cols   = [f"vol_{i}"   for i in range(lookback)]
@@ -100,7 +110,7 @@ class LinReg:
         Xb = np.c_[np.ones(X.shape[0]), X]
         return Xb @ self.theta
 
-# ---------- 2.  TRAIN 7-day & 25-day MODELS ----------
+# ---------- 2.  TRAIN SHORT & LONG HORIZON MODELS ----------
 def train_model(horizon):
     d = df.copy()
     d["y"] = (d["close"].shift(-horizon) / d["close"] - 1) * 100
@@ -112,41 +122,41 @@ def train_model(horizon):
     pred  = model.predict(X[s:])
     return pred
 
-pred6  = train_model(7)
-pred10 = train_model(25)
+pred_short = train_model(SHORT_HORIZON)
+pred_long  = train_model(LONG_HORIZON)
 
 # ----------  3.  TRADE  ----------
 first = split
-min_len = min(len(pred6), len(pred10))
+min_len = min(len(pred_short), len(pred_long))
 pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
 
-pred6  = pred6 [:min_len]
-pred10 = pred10[:min_len]
+pred_short = pred_short[:min_len]
+pred_long  = pred_long[:min_len]
 
-capital = 1000.0
-buyhold = 1000.0
-lev     = 4.0
-stop    = 0.45
+capital = INITIAL_CAPITAL
+buyhold = INITIAL_CAPITAL
+lev     = LEVERAGE
+stop    = STOP_LOSS_PCT
 
 pos     = 0
 entry_i = 0
 max_cap = capital
 worst_dd = 0.0
 
-print("date        7d%  25d%  pos  equity   buy&hold")
+print(f"date        {SHORT_HORIZON}d%  {LONG_HORIZON}d%  pos  equity   buy&hold")
 results = []  # <-- NEW: collect rows for CSV
 for i in range(len(pct1d)):
-    p6, p10 = pred6[i], pred10[i]
+    ps, pl = pred_short[i], pred_long[i]
     new_pos = 0
-    if   p6 > 0 and p10 > 0: new_pos =  1
-    elif p6 < 0 and p10 < 0: new_pos = -1
+    if   ps > 0 and pl > 0: new_pos =  1
+    elif ps < 0 and pl < 0: new_pos = -1
 
     if pos != 0:
         realised = (close[first+i] / close[first+entry_i] - 1) * 100 * pos
-        if realised <= -stop * abs(pred6[entry_i]):
+        if realised <= -stop * abs(pred_short[entry_i]):
             new_pos = 0
-        if pos ==  1 and p6 < 0 and p10 < 0: new_pos = 0
-        if pos == -1 and p6 > 0 and p10 > 0: new_pos = 0
+        if pos ==  1 and ps < 0 and pl < 0: new_pos = 0
+        if pos == -1 and ps > 0 and pl > 0: new_pos = 0
 
     if new_pos != pos:
         if pos != 0:
@@ -165,15 +175,15 @@ for i in range(len(pct1d)):
         worst_dd = dd
 
     date_str = df['date'].iloc[first+i].strftime('%Y-%m-%d')
-    print(f"{date_str}  {p6:5.1f}  {p10:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
-    results.append([date_str, p6, p10, pos, capital, buyhold])
+    print(f"{date_str}  {ps:5.1f}  {pl:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
+    results.append([date_str, ps, pl, pos, capital, buyhold])
     time.sleep(0.01)
 
 if pos != 0:
     gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
     capital *= gross
 
-print(f"\nFinal equity (4×) : {capital:8.2f}")
+print(f"\nFinal equity ({LEVERAGE}×) : {capital:8.2f}")
 print(f"Buy & hold        : {buyhold:8.2f}")
 print(f"Excess            : {capital - buyhold:8.2f}")
 print(f"Worst trade (%)   : {worst_dd:8.2f}")
@@ -182,24 +192,24 @@ print(f"Worst trade (%)   : {worst_dd:8.2f}")
 # 4.  ACCURACY & ERROR METRICS
 # --------------------------------------------------
 d = df.copy()
-d["y6"]  = (d["close"].shift(-7)  / d["close"] - 1) * 100
-d["y10"] = (d["close"].shift(-25) / d["close"] - 1) * 100
+d["y_short"] = (d["close"].shift(-SHORT_HORIZON) / d["close"] - 1) * 100
+d["y_long"]  = (d["close"].shift(-LONG_HORIZON)  / d["close"] - 1) * 100
 d = d.iloc[split:split+min_len]
 
-acc6  = (np.sign(d["y6"].values)  == np.sign(pred6)).mean()
-acc10 = (np.sign(d["y10"].values) == np.sign(pred10)).mean()
-mae6  = np.abs(d["y6"].values  - pred6).mean()
-mae10 = np.abs(d["y10"].values - pred10).mean()
-mse6  = ((d["y6"].values  - pred6) ** 2).mean()
-mse10 = ((d["y10"].values - pred10) ** 2).mean()
+acc_short = (np.sign(d["y_short"].values) == np.sign(pred_short)).mean()
+acc_long  = (np.sign(d["y_long"].values)  == np.sign(pred_long)).mean()
+mae_short = np.abs(d["y_short"].values - pred_short).mean()
+mae_long  = np.abs(d["y_long"].values  - pred_long).mean()
+mse_short = ((d["y_short"].values - pred_short) ** 2).mean()
+mse_long  = ((d["y_long"].values  - pred_long) ** 2).mean()
 
 print("\nPrediction quality (out-of-sample)")
-print(f"7-day  directional accuracy : {acc6:6.1%}")
-print(f"25-day directional accuracy : {acc10:6.1%}")
-print(f"7-day  MAE                  : {mae6:6.2f}%")
-print(f"25-day MAE                  : {mae10:6.2f}%")
-print(f"7-day  MSE                  : {mse6:6.2f}")
-print(f"25-day MSE                  : {mse10:6.2f}")
+print(f"{SHORT_HORIZON}-day  directional accuracy : {acc_short:6.1%}")
+print(f"{LONG_HORIZON}-day directional accuracy : {acc_long:6.1%}")
+print(f"{SHORT_HORIZON}-day  MAE                  : {mae_short:6.2f}%")
+print(f"{LONG_HORIZON}-day MAE                  : {mae_long:6.2f}%")
+print(f"{SHORT_HORIZON}-day  MSE                  : {mse_short:6.2f}")
+print(f"{LONG_HORIZON}-day MSE                  : {mse_long:6.2f}")
 
 # --------------------------------------------------
 # 5.  MULTI-DAY PREDICTION ANALYSIS (NEW!)
@@ -228,26 +238,26 @@ for days_ahead in range(1, 11):
         else:
             actual_returns[days_ahead] = np.full(min_len, np.nan)
 
-# Test pred6 against each horizon
-print("\n--- PRED7 (trained on 7-day horizon) ---")
+# Test pred_short against each horizon
+print(f"\n--- PRED_SHORT (trained on {SHORT_HORIZON}-day horizon) ---")
 print(f"{'Days':<6} {'Dir.Acc':<10} {'MAE':<10} {'MSE':<10} {'Corr':<10}")
 print("-" * 50)
 
-pred6_results = {}
+pred_short_results = {}
 for days_ahead in range(1, 11):
     actual = actual_returns[days_ahead]
     valid_mask = ~np.isnan(actual)
     
     if valid_mask.sum() > 0:
         actual_valid = actual[valid_mask]
-        pred_valid = pred6[valid_mask]
+        pred_valid = pred_short[valid_mask]
         
         dir_acc = (np.sign(actual_valid) == np.sign(pred_valid)).mean()
         mae = np.abs(actual_valid - pred_valid).mean()
         mse = ((actual_valid - pred_valid) ** 2).mean()
         corr = np.corrcoef(actual_valid, pred_valid)[0, 1]
         
-        pred6_results[days_ahead] = {
+        pred_short_results[days_ahead] = {
             'dir_acc': dir_acc,
             'mae': mae,
             'mse': mse,
@@ -256,26 +266,26 @@ for days_ahead in range(1, 11):
         
         print(f"{days_ahead:<6} {dir_acc:>8.1%}  {mae:>8.2f}%  {mse:>8.2f}  {corr:>8.3f}")
 
-# Test pred10 against each horizon
-print("\n--- PRED25 (trained on 25-day horizon) ---")
+# Test pred_long against each horizon
+print(f"\n--- PRED_LONG (trained on {LONG_HORIZON}-day horizon) ---")
 print(f"{'Days':<6} {'Dir.Acc':<10} {'MAE':<10} {'MSE':<10} {'Corr':<10}")
 print("-" * 50)
 
-pred10_results = {}
+pred_long_results = {}
 for days_ahead in range(1, 11):
     actual = actual_returns[days_ahead]
     valid_mask = ~np.isnan(actual)
     
     if valid_mask.sum() > 0:
         actual_valid = actual[valid_mask]
-        pred_valid = pred10[valid_mask]
+        pred_valid = pred_long[valid_mask]
         
         dir_acc = (np.sign(actual_valid) == np.sign(pred_valid)).mean()
         mae = np.abs(actual_valid - pred_valid).mean()
         mse = ((actual_valid - pred_valid) ** 2).mean()
         corr = np.corrcoef(actual_valid, pred_valid)[0, 1]
         
-        pred10_results[days_ahead] = {
+        pred_long_results[days_ahead] = {
             'dir_acc': dir_acc,
             'mae': mae,
             'mse': mse,
@@ -289,23 +299,23 @@ print("\n" + "="*70)
 print("BEST PREDICTION HORIZONS")
 print("="*70)
 
-best_pred6_dir = max(pred6_results.items(), key=lambda x: x[1]['dir_acc'])
-best_pred6_mae = min(pred6_results.items(), key=lambda x: x[1]['mae'])
-best_pred6_corr = max(pred6_results.items(), key=lambda x: x[1]['corr'])
+best_short_dir = max(pred_short_results.items(), key=lambda x: x[1]['dir_acc'])
+best_short_mae = min(pred_short_results.items(), key=lambda x: x[1]['mae'])
+best_short_corr = max(pred_short_results.items(), key=lambda x: x[1]['corr'])
 
-best_pred10_dir = max(pred10_results.items(), key=lambda x: x[1]['dir_acc'])
-best_pred10_mae = min(pred10_results.items(), key=lambda x: x[1]['mae'])
-best_pred10_corr = max(pred10_results.items(), key=lambda x: x[1]['corr'])
+best_long_dir = max(pred_long_results.items(), key=lambda x: x[1]['dir_acc'])
+best_long_mae = min(pred_long_results.items(), key=lambda x: x[1]['mae'])
+best_long_corr = max(pred_long_results.items(), key=lambda x: x[1]['corr'])
 
-print("\nPRED7 (trained on 7-day):")
-print(f"  Best directional accuracy: Day {best_pred6_dir[0]} ({best_pred6_dir[1]['dir_acc']:.1%})")
-print(f"  Best MAE (magnitude):      Day {best_pred6_mae[0]} ({best_pred6_mae[1]['mae']:.2f}%)")
-print(f"  Best correlation:          Day {best_pred6_corr[0]} ({best_pred6_corr[1]['corr']:.3f})")
+print(f"\nPRED_SHORT (trained on {SHORT_HORIZON}-day):")
+print(f"  Best directional accuracy: Day {best_short_dir[0]} ({best_short_dir[1]['dir_acc']:.1%})")
+print(f"  Best MAE (magnitude):      Day {best_short_mae[0]} ({best_short_mae[1]['mae']:.2f}%)")
+print(f"  Best correlation:          Day {best_short_corr[0]} ({best_short_corr[1]['corr']:.3f})")
 
-print("\nPRED25 (trained on 25-day):")
-print(f"  Best directional accuracy: Day {best_pred10_dir[0]} ({best_pred10_dir[1]['dir_acc']:.1%})")
-print(f"  Best MAE (magnitude):      Day {best_pred10_mae[0]} ({best_pred10_mae[1]['mae']:.2f}%)")
-print(f"  Best correlation:          Day {best_pred10_corr[0]} ({best_pred10_corr[1]['corr']:.3f})")
+print(f"\nPRED_LONG (trained on {LONG_HORIZON}-day):")
+print(f"  Best directional accuracy: Day {best_long_dir[0]} ({best_long_dir[1]['dir_acc']:.1%})")
+print(f"  Best MAE (magnitude):      Day {best_long_mae[0]} ({best_long_mae[1]['mae']:.2f}%)")
+print(f"  Best correlation:          Day {best_long_corr[0]} ({best_long_corr[1]['corr']:.3f})")
 
 # --------------------------------------------------
 # 6.  WRITE CSV + START WEB SERVER
@@ -318,22 +328,22 @@ for i in range(len(results)):
     date_str = results[i][0]
     
     # Shift prediction dates forward to match their forecast horizons
-    date_pred6 = df['date'].iloc[first+i+7].strftime('%Y-%m-%d') if first+i+7 < len(df) else date_str
-    date_pred10 = df['date'].iloc[first+i+25].strftime('%Y-%m-%d') if first+i+25 < len(df) else date_str
+    date_pred_short = df['date'].iloc[first+i+SHORT_HORIZON].strftime('%Y-%m-%d') if first+i+SHORT_HORIZON < len(df) else date_str
+    date_pred_long = df['date'].iloc[first+i+LONG_HORIZON].strftime('%Y-%m-%d') if first+i+LONG_HORIZON < len(df) else date_str
     
     results_fixed.append([
         date_str,           # actual date for equity tracking
-        date_pred6,         # date where pred7 forecast applies
-        date_pred10,        # date where pred25 forecast applies
-        results[i][1],      # pred7 value
-        results[i][2],      # pred25 value
+        date_pred_short,    # date where short forecast applies
+        date_pred_long,     # date where long forecast applies
+        results[i][1],      # pred_short value
+        results[i][2],      # pred_long value
         results[i][3],      # position
         results[i][4],      # equity
         results[i][5]       # buyhold
     ])
 
 pd.DataFrame(results_fixed, 
-             columns=["date","date_pred7","date_pred25","pred7","pred25","pos","equity","buyhold"]
+             columns=["date","date_pred_short","date_pred_long","pred_short","pred_long","pos","equity","buyhold"]
             ).to_csv(csv_path, index=False)
 print(f"\nResults saved → {csv_path.resolve()}")
 
