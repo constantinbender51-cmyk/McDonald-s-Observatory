@@ -4,7 +4,7 @@
 LOOKBACK = 10           # Number of historical days for features
 SHORT_HORIZON = 6       # Days ahead for short-term prediction
 LONG_HORIZON = 10       # Days ahead for long-term prediction
-SHIFT_VARIABLE = 3      # How many days ahead to use predictions from
+SHIFT_VARIABLE = 1      # How many days ahead to use predictions from
 THRESHOLD = 1.0         # Prediction threshold (%) for taking positions
 LEVERAGE = 1.0          # Position leverage multiplier
 STOP_LOSS_PCT = 9.8    # Stop loss as % of predicted move (0.45 = 45%)
