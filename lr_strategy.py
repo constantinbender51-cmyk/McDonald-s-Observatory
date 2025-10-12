@@ -160,10 +160,21 @@ for shift_var in SHIFT_VALUES:
     valid_mask = ~(np.isnan(pred_short[:min_len]) | np.isnan(pred_long[:min_len]))
     min_len = np.sum(valid_mask)
     
+    # 1. build the mask once
+    valid_mask = ~(np.isnan(pred_short) | np.isnan(pred_long))
     pred_short_valid = pred_short[valid_mask]
-    pred_long_valid = pred_long[valid_mask]
-    pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
-    
+    pred_long_valid  = pred_long[valid_mask]
+
+    # 2. derive the corresponding close slice
+    #    first_valid is the index (relative to 'first') of the first True
+    first_valid = np.where(valid_mask)[0][0]
+    last_valid  = np.where(valid_mask)[0][-1]
+    pct1d = (close[first+first_valid+1 : first+last_valid+2] /
+             close[first+first_valid : first+last_valid+1] - 1)
+
+    # 3. keep the date array consistent
+    dates = df['date'].values[first+first_valid : first+last_valid+1]
+
     for threshold in THRESHOLD_VALUES:
         capital = INITIAL_CAPITAL
         buyhold = INITIAL_CAPITAL
