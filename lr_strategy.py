@@ -124,8 +124,8 @@ pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
 
 pred6  = pred6 [:min_len]
 pred10 = pred10[:min_len]
-sma_window = 6
-deriv_thresh = 0.3
+sma_window = 1
+deriv_thresh = 0
 stop_pct = 0.8          # 0.8 % of |pred10| at entry
 
 # build 6-day SMA of pred10
