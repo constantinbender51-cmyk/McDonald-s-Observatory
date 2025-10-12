@@ -118,6 +118,12 @@ pred10 = train_model(10)
 # --------------------------------------------------
 # 3.  NEW TRADE LOGIC  (6-day SMA of pred10 + derivative)
 # --------------------------------------------------
+first = split
+min_len = min(len(pred6), len(pred10))
+pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
+
+pred6  = pred6 [:min_len]
+pred10 = pred10[:min_len]
 sma_window = 6
 deriv_thresh = 0.3
 stop_pct = 0.8          # 0.8 % of |pred10| at entry
