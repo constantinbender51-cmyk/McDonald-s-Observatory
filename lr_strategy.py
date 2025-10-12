@@ -143,19 +143,41 @@ print(f"Threshold:     ±{THRESHOLD}%")
 print(f"Position logic: Both > threshold → LONG | Both < -threshold → SHORT | Else → HOLD")
 print(f"{'='*70}\n")
 
-# Shift predictions backward
-pred_short = np.concatenate([pred_short_raw[short_shift:], np.full(short_shift, np.nan)])
-pred_long = np.concatenate([pred_long_raw[long_shift:], np.full(long_shift, np.nan)])
+# ----------  3.  SHIFT PREDICTIONS & TRADE  ----------
+first = split
 
-# Find valid range
-min_len = min(len(pred_short), len(pred_long))
-valid_mask = ~(np.isnan(pred_short[:min_len]) | np.isnan(pred_long[:min_len]))
-min_len = np.sum(valid_mask)
+# --- raw predictions already aligned to df[split:] ----------
+short_raw = pred_short_raw
+long_raw  = pred_long_raw
 
+# --- how many future rows we actually have ----------
+max_trade_rows = len(df) - first - 1          # we need t+1 to compute pct1d
+
+# --- truncate everything to that length ----------
+short_raw = short_raw[:max_trade_rows]
+long_raw  = long_raw [:max_trade_rows]
+close_slice = close[first : first + max_trade_rows + 1]   # +1 for pct1d
+
+# --- build pct1d ---
+pct1d = (close_slice[1:] / close_slice[:-1] - 1)
+
+# --- now apply the horizon shift for *trading* signals ----------
+short_shift = SHORT_HORIZON - SHIFT_VARIABLE
+long_shift  = LONG_HORIZON  - SHIFT_VARIABLE
+
+# pad with NaNs at the end so that the signal lines up with the day it is acted on
+pred_short = np.full(len(short_raw), np.nan)
+pred_long  = np.full(len(long_raw),  np.nan)
+
+pred_short[:-short_shift] = short_raw[short_shift:]
+pred_long [:-long_shift]  = long_raw [long_shift:]
+
+# --- common mask: both predictions finite ----------
+valid_mask = ~(np.isnan(pred_short) | np.isnan(pred_long))
 pred_short = pred_short[valid_mask]
-pred_long = pred_long[valid_mask]
+pred_long  = pred_long [valid_mask]
+pct1d      = pct1d[valid_mask]
 
-pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
 
 capital = INITIAL_CAPITAL
 buyhold = INITIAL_CAPITAL
