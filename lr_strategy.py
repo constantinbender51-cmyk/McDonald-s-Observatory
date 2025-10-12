@@ -172,9 +172,12 @@ sh_long  = LONG_HORIZON  - SHIFT_VARIABLE
 pred_short = np.full(n_rows, np.nan)
 pred_long  = np.full(n_rows, np.nan)
 
-pred_short[:-sh_short] = pred_short_raw[sh_short:]
-pred_long [:-sh_long]  = pred_long_raw [sh_long:]
+# safe slice: use the smallest common length
+out_len = min(len(pred_short[:-sh_short]), len(pred_short_raw[sh_short:]))
+pred_short[:out_len] = pred_short_raw[sh_short:sh_short+out_len]
 
+out_len = min(len(pred_long[:-sh_long]), len(pred_long_raw[sh_long:]))
+pred_long[:out_len]  = pred_long_raw[sh_long:sh_long+out_len]
 # --- final mask: both forecasts finite ----------
 mask = ~(np.isnan(pred_short) | np.isnan(pred_long))
 pred_short = pred_short[mask]
