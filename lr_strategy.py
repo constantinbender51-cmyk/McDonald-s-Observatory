@@ -143,9 +143,11 @@ for i in range(len(pct1d)):
 
     # ----  fixed 3 % stop-loss  ----
     if pos != 0:
-        dd_price = (close[first+i] / entry_p - 1) * 100 * pos   # % move since entry
-        if dd_price <= -stop:          # 3 % adverse move triggers exit
+    dd_price = (close[first+i] / entry_p - 1) * 100 * pos
+        if dd_price <= -stop:
+            print(f"STOP-OUT {date_str}  side={pos:2d}  entry={entry_p:.2f}  now={close[first+i]:.2f}  dd={dd_price:.2f}%")
             new_pos = 0
+
         # optional forecast-based early exit (kept from original)
         if pos ==  1 and p6 < 0 and p10 < 0: new_pos = 0
         if pos == -1 and p6 > 0 and p10 > 0: new_pos = 0
