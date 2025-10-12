@@ -116,7 +116,7 @@ pred6  = train_model(6)
 pred10 = train_model(10)
 
 # --------------------------------------------------
-# 3.  NEW TRADE LOGIC  (6-day SMA of pred10 + derivative)
+# 3.  GRID-SEARCH  sma_window, deriv_thresh, stop_pct
 # --------------------------------------------------
 first = split
 min_len = min(len(pred6), len(pred10))
@@ -124,81 +124,95 @@ pct1d = (close[first+1 : first+min_len+1] / close[first : first+min_len] - 1)
 
 pred6  = pred6 [:min_len]
 pred10 = pred10[:min_len]
-sma_window = 1
-deriv_thresh = 0
-stop_pct = 0.8          # 0.8 % of |pred10| at entry
 
-# build 6-day SMA of pred10
-pred10_sma = pd.Series(pred10).rolling(sma_window).mean().values
+grid_records = []          # one dict per parameter set
 
-# derivative: day-to-day change
-pred10_deriv = np.full_like(pred10_sma, np.nan)
-pred10_deriv[1:] = pred10_sma[1:] - pred10_sma[:-1]
+for sma_window in range(1, 11):                       # 1 … 10
+    pred10_sma = pd.Series(pred10).rolling(sma_window).mean().values
+    pred10_deriv = np.full_like(pred10_sma, np.nan)
+    pred10_deriv[1:] = pred10_sma[1:] - pred10_sma[:-1]
 
-capital = 1000.0
-buyhold = 1000.0
-lev     = 1
-pos     = 0
-entry_i = 0
-entry_pred10_abs = 0.0   # |pred10| at entry
-max_cap = capital
-worst_dd = 0.0
+    for deriv_thresh in np.arange(0.1, 5.05, 0.1):    # 0.1 … 5.0
+        for stop_pct in np.arange(0.2, 2.1, 0.2):     # 0.2 … 2.0
 
-print("date        6d%  10d%  deriv   pos  equity   buy&hold")
-results = []
+            capital = 1000.0
+            lev     = 3.0
+            pos     = 0
+            entry_i = 0
+            entry_pred10_abs = 0.0
+            max_cap = capital
+            worst_dd = 0.0
+            trades = 0
+            equity_curve = []
 
-for i in range(len(pct1d)):
-    p6, p10 = pred6[i], pred10[i]
-    deriv = pred10_deriv[i]
-    
-    # --- desired position ---
-    desired = 0
-    if not np.isnan(deriv):
-        if deriv > deriv_thresh:
-            desired = 1
-        elif deriv < -deriv_thresh:
-            desired = -1
-    
-    # --- stop-loss check ---
-    if pos != 0:
-        realised = (close[first+i] / close[first+entry_i] - 1) * 100 * pos
-        if realised <= -stop_pct * entry_pred10_abs:
-            desired = 0
-    
-    # --- position change ---
-    if desired != pos:
-        if pos != 0:               # exit old
-            gross = 1 + (close[first+i] / close[first+entry_i] - 1) * lev * pos
-            capital *= gross
-        if desired != 0:           # enter new
-            entry_i = i
-            entry_pred10_abs = abs(p10)
-        pos = desired
-    
-    # --- track buy&hold ---
-    buyhold *= 1 + pct1d[i]
-    
-    # --- drawdown ---
-    if capital > max_cap:
-        max_cap = capital
-    dd = (capital - max_cap) / max_cap * 100
-    if dd < worst_dd:
-        worst_dd = dd
-    
-    date_str = df['date'].iloc[first+i].strftime('%Y-%m-%d')
-    print(f"{date_str}  {p6:5.1f}  {p10:5.1f}  {deriv:5.2f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
-    results.append([date_str, p6, p10, deriv, pos, capital, buyhold])
-    time.sleep(0.01)
+            for i in range(len(pct1d)):
+                p6, p10 = pred6[i], pred10[i]
+                deriv = pred10_deriv[i]
 
-# final exit if still in trade
-if pos != 0:
-    gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
-    capital *= gross
+                # desired position
+                desired = 0
+                if not np.isnan(deriv):
+                    desired = 1 if deriv > deriv_thresh else (-1 if deriv < -deriv_thresh else 0)
 
-print(f"\nFinal equity (3×) : {capital:8.2f}")
-print(f"Buy & hold        : {buyhold:8.2f}")
-print(f"Excess            : {capital - buyhold:8.2f}")
-print(f"Worst trade (%)   : {worst_dd:8.2f}")
+                # stop-loss
+                if pos != 0:
+                    realised = (close[first+i] / close[first+entry_i] - 1) * 100 * pos
+                    if realised <= -stop_pct * entry_pred10_abs:
+                        desired = 0
+
+                # position change
+                if desired != pos:
+                    if pos != 0:               # exit
+                        gross = 1 + (close[first+i] / close[first+entry_i] - 1) * lev * pos
+                        capital *= gross
+                    if desired != 0:           # enter
+                        entry_i = i
+                        entry_pred10_abs = abs(p10)
+                        trades += 1
+                    pos = desired
+
+                equity_curve.append(capital)
+                if capital > max_cap:
+                    max_cap = capital
+                dd = (capital - max_cap) / max_cap
+                if dd < worst_dd:
+                    worst_dd = dd
+
+            # final exit if still in market
+            if pos != 0:
+                gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
+                capital *= gross
+                equity_curve.append(capital)
+
+            # buy&hold final value
+            buyhold = 1000.0 * (close[first+len(pct1d)] / close[first])
+
+            # Sharpe-ish (excess over risk-free ≈ 0, 1-day steps)
+            ret = np.diff(equity_curve) / equity_curve[:-1]
+            sharpe = (ret.mean() / ret.std()) * np.sqrt(365) if ret.std() else 0
+
+            grid_records.append({
+                "sma_window": sma_window,
+                "deriv_thresh": round(deriv_thresh, 2),
+                "stop_pct": round(stop_pct, 2),
+                "final_eq": round(capital, 2),
+                "buyhold": round(buyhold, 2),
+                "excess": round(capital - buyhold, 2),
+                "max_dd_pct": round(worst_dd * 100, 2),
+                "trades": trades,
+                "sharpe": round(sharpe, 3)
+            })
+
+# save grid
+grid_df = pd.DataFrame(grid_records)
+grid_df.to_csv("grid_results.csv", index=False)
+print("Grid finished → grid_results.csv  ({} rows)".format(len(grid_df)))
+# --------------------------------------------------
+# 4.  SHOW BEST 5 BY SHARPE
+# --------------------------------------------------
+print("\nTop 5 parameter sets by Sharpe ratio:")
+print(grid_df.sort_values("sharpe", ascending=False).head()[
+        ["sma_window","deriv_thresh","stop_pct","final_eq","max_dd_pct","trades","sharpe"]])
 
 # --------------------------------------------------
 # 6.  WRITE CSV + START WEB SERVER  (same as before)
