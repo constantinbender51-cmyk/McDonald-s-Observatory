@@ -126,7 +126,7 @@ pred10 = pred10[:min_len]
 capital = 1000.0
 buyhold = 1000.0
 lev     = 3.0
-stop    = -5                 # ← fixed 3 % stop (in price space)
+stop    = -10                 # ← fixed 3 % stop (in price space)
 
 pos     = 0
 entry_p = 0.0                 # entry price (not index) for the live position
