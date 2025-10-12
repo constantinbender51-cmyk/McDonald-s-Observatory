@@ -198,6 +198,7 @@ print(f"\nFinal equity (3×) : {capital:8.2f}")
 print(f"Buy & hold        : {buyhold:8.2f}")
 print(f"Excess            : {capital - buyhold:8.2f}")
 print(f"Worst trade (%)   : {worst_dd:8.2f}")
+time.sleep(0.01)
 
 # --------------------------------------------------
 # 6.  WRITE CSV + START WEB SERVER  (same as before)
