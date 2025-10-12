@@ -214,29 +214,3 @@ print("\nTop 5 parameter sets by Sharpe ratio:")
 print(grid_df.sort_values("sharpe", ascending=False).head()[
         ["sma_window","deriv_thresh","stop_pct","final_eq","max_dd_pct","trades","sharpe"]])
 
-# --------------------------------------------------
-# 6.  WRITE CSV + START WEB SERVER  (same as before)
-# --------------------------------------------------
-csv_path = Path("results.csv")
-results_fixed = []
-for i in range(len(results)):
-    date_str = results[i][0]
-    date_pred6 = df['date'].iloc[first+i+6].strftime('%Y-%m-%d') if first+i+6 < len(df) else date_str
-    date_pred10 = df['date'].iloc[first+i+10].strftime('%Y-%m-%d') if first+i+10 < len(df) else date_str
-    results_fixed.append([
-        date_str, date_pred6, date_pred10,
-        results[i][1], results[i][2], results[i][3],
-        results[i][4], results[i][5], results[i][6]
-    ])
-pd.DataFrame(results_fixed,
-             columns=["date","date_pred6","date_pred10","pred6","pred10","deriv","pos","equity","buyhold"]
-            ).to_csv(csv_path, index=False)
-print(f"\nResults saved → {csv_path.resolve()}")
-
-import subprocess, webbrowser, time, os
-port = int(os.environ.get("PORT", 5000))
-proc = subprocess.Popen(["python", "webplot.py"], cwd=Path(__file__).parent)
-time.sleep(1.5)
-webbrowser.open(f"http://127.0.0.1:{port}/")
-print("Browser opened – Ctrl-C here to stop the server.")
-proc.wait()
