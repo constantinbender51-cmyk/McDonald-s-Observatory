@@ -137,7 +137,7 @@ pred10_deriv[1:] = pred10_sma[1:] - pred10_sma[:-1]
 
 capital = 1000.0
 buyhold = 1000.0
-lev     = 3.0
+lev     = 1
 pos     = 0
 entry_i = 0
 entry_pred10_abs = 0.0   # |pred10| at entry
