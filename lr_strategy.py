@@ -126,34 +126,36 @@ pred10 = pred10[:min_len]
 capital = 1000.0
 buyhold = 1000.0
 lev     = 3.0
-stop    = 0.8
+stop    = 3.0                 # ← fixed 3 % stop (in price space)
 
 pos     = 0
-entry_i = 0
+entry_p = 0.0                 # entry price (not index) for the live position
 max_cap = capital
 worst_dd = 0.0
 
 print("date        6d%  10d%  pos  equity   buy&hold")
-results = []  # <-- NEW: collect rows for CSV
+results = []
 for i in range(len(pct1d)):
     p6, p10 = pred6[i], pred10[i]
     new_pos = 0
     if   p6 > 0 and p10 > 0: new_pos =  1
     elif p6 < 0 and p10 < 0: new_pos = -1
 
+    # ----  fixed 3 % stop-loss  ----
     if pos != 0:
-        realised = (close[first+i] / close[first+entry_i] - 1) * 100 * pos
-        if realised <= -stop * abs(pred6[entry_i]):
+        dd_price = (close[first+i] / entry_p - 1) * 100 * pos   # % move since entry
+        if dd_price <= -stop:          # 3 % adverse move triggers exit
             new_pos = 0
+        # optional forecast-based early exit (kept from original)
         if pos ==  1 and p6 < 0 and p10 < 0: new_pos = 0
         if pos == -1 and p6 > 0 and p10 > 0: new_pos = 0
 
     if new_pos != pos:
-        if pos != 0:
-            gross = 1 + (close[first+i] / close[first+entry_i] - 1) * lev * pos
+        if pos != 0:                 # close existing position
+            gross = 1 + (close[first+i] / entry_p - 1) * lev * pos
             capital *= gross
-        if new_pos != 0:
-            entry_i = i
+        if new_pos != 0:             # open new position
+            entry_p = close[first+i]
         pos = new_pos
 
     buyhold *= 1 + pct1d[i]
@@ -167,10 +169,10 @@ for i in range(len(pct1d)):
     date_str = df['date'].iloc[first+i].strftime('%Y-%m-%d')
     print(f"{date_str}  {p6:5.1f}  {p10:5.1f}  {pos:3d}  {capital:8.2f}  {buyhold:8.2f}")
     results.append([date_str, p6, p10, pos, capital, buyhold])
-    time.sleep(0.01)
 
+# final close-out if still in position
 if pos != 0:
-    gross = 1 + (close[first+len(pct1d)-1] / close[first+entry_i] - 1) * lev * pos
+    gross = 1 + (close[first+len(pct1d)-1] / entry_p - 1) * lev * pos
     capital *= gross
 
 print(f"\nFinal equity (3×) : {capital:8.2f}")
