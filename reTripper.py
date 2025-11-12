@@ -7,7 +7,36 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
-def fetch_binance_data(symbol='BTCUSDT', interval='1d', start_date='2017-01-01'):
+# ============================================================================
+# HYPERPARAMETERS
+# ============================================================================
+START_DATE = '2018-01-01'  # Data start date
+LOOKBACK_DAYS = 10  # Number of days for input features
+PREDICTION_HORIZONS = [6, 10]  # Days ahead to predict
+STOP_LOSS_MULTIPLIER = 0.8  # Stop loss as fraction of predicted return (80%)
+TRAIN_TEST_SPLIT = 0.8  # Train/test split ratio
+INITIAL_CAPITAL = 1000  # Starting capital in USD
+
+# MACD parameters
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
+
+# Stochastic RSI parameters
+STOCH_RSI_PERIOD = 14
+STOCH_RSI_SMOOTH_K = 3
+STOCH_RSI_SMOOTH_D = 3
+
+# Logistic Regression parameters
+LR_MAX_ITER = 1000
+LR_RANDOM_STATE = 42
+
+# Binance API parameters
+BINANCE_SYMBOL = 'BTCUSDT'
+BINANCE_INTERVAL = '1d'
+# ============================================================================
+
+def fetch_binance_data(symbol=BINANCE_SYMBOL, interval=BINANCE_INTERVAL, start_date=START_DATE):
     """Fetch OHLCV data from Binance"""
     url = 'https://api.binance.com/api/v3/klines'
     
@@ -46,7 +75,7 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1d', start_date='2017-01-01')
     
     return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].set_index('timestamp')
 
-def calculate_macd(prices, fast=12, slow=26, signal=9):
+def calculate_macd(prices, fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL):
     """Calculate MACD signal line"""
     ema_fast = prices.ewm(span=fast).mean()
     ema_slow = prices.ewm(span=slow).mean()
@@ -54,7 +83,7 @@ def calculate_macd(prices, fast=12, slow=26, signal=9):
     signal_line = macd.ewm(span=signal).mean()
     return signal_line
 
-def calculate_stoch_rsi(prices, period=14, smooth_k=3, smooth_d=3):
+def calculate_stoch_rsi(prices, period=STOCH_RSI_PERIOD, smooth_k=STOCH_RSI_SMOOTH_K, smooth_d=STOCH_RSI_SMOOTH_D):
     """Calculate Stochastic RSI"""
     delta = prices.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -67,7 +96,7 @@ def calculate_stoch_rsi(prices, period=14, smooth_k=3, smooth_d=3):
     
     return stoch_rsi_k
 
-def create_features(df, lookback=10):
+def create_features(df, lookback=LOOKBACK_DAYS):
     """Create features for the model"""
     features = pd.DataFrame(index=df.index)
     
@@ -87,7 +116,7 @@ def create_features(df, lookback=10):
     
     return features
 
-def create_targets(df, horizons=[6, 10]):
+def create_targets(df, horizons=PREDICTION_HORIZONS):
     """Create target variables (future returns)"""
     targets = pd.DataFrame(index=df.index)
     
