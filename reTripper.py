@@ -14,9 +14,9 @@ warnings.filterwarnings('ignore')
 # HYPERPARAMETERS
 # ============================================================================
 START_DATE = '2018-01-01'  # Data start date
-LOOKBACK_DAYS = 10  # Number of days for input features
-PREDICTION_HORIZONS = [6, 10]  # Days ahead to predict
-STOP_LOSS_MULTIPLIER = 0.8  # Stop loss as fraction of predicted return (80%)
+LOOKBACK_DAYS = 15  # Number of days for input features
+PREDICTION_HORIZONS = [5, 27]  # Days ahead to predict
+STOP_LOSS_MULTIPLIER = 0.45  # Stop loss as fraction of predicted return (80%)
 TRAIN_TEST_SPLIT = 0.8  # Train/test split ratio
 INITIAL_CAPITAL = 1000  # Starting capital in USD
 
