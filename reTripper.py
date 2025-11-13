@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore')
 START_DATE = '2018-01-01'  # Data start date
 LOOKBACK_DAYS = 10  # Number of days for input features
 PREDICTION_HORIZONS = [6, 10]  # Days ahead to predict
-STOP_LOSS_MULTIPLIER = 9.45  # Stop loss as fraction of predicted return (80%)
+STOP_LOSS_MULTIPLIER = 0.8  # Stop loss as fraction of predicted return (80%)
 TRAIN_TEST_SPLIT = 0.8  # Train/test split ratio
 INITIAL_CAPITAL = 1000  # Starting capital in USD
 
@@ -202,6 +202,50 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
     for i in range(len(test_data)):
         current_date = test_data.index[i]
         current_price = test_prices.iloc[i]
+        current_high = df.loc[current_date, 'high']
+        current_low = df.loc[current_date, 'low']
+        
+        # Check stop loss if in position (using high/low, not close)
+        stop_loss_triggered = False
+        if position != 0:
+            if position == 1:  # Long position
+                if current_low <= stop_loss:
+                    # Close position at stop loss price
+                    exit_price = stop_loss
+                    pnl_pct = (exit_price - entry_price) / entry_price
+                    capital = capital * (1 + pnl_pct)
+                    trades.append({
+                        'type': 'exit',
+                        'position_type': 'long',
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'price': exit_price,
+                        'reason': 'stop_loss',
+                        'pnl_pct': pnl_pct * 100,
+                        'capital': capital,
+                        'entry_date': entry_date,
+                        'entry_price': entry_price
+                    })
+                    position = 0
+                    stop_loss_triggered = True
+            elif position == -1:  # Short position
+                if current_high >= stop_loss:
+                    # Close position at stop loss price
+                    exit_price = stop_loss
+                    pnl_pct = (entry_price - exit_price) / entry_price
+                    capital = capital * (1 + pnl_pct)
+                    trades.append({
+                        'type': 'exit',
+                        'position_type': 'short',
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'price': exit_price,
+                        'reason': 'stop_loss',
+                        'pnl_pct': pnl_pct * 100,
+                        'capital': capital,
+                        'entry_date': entry_date,
+                        'entry_price': entry_price
+                    })
+                    position = 0
+                    stop_loss_triggered = True
         
         # Track capital and benchmark at each step
         current_capital = capital
@@ -222,52 +266,36 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
             'value': benchmark_value
         })
         
-        # Check stop loss if in position
-        if position != 0:
-            if position == 1:  # Long position
-                if current_price <= stop_loss:
-                    # Close position
-                    pnl_pct = (current_price - entry_price) / entry_price
-                    capital = capital * (1 + pnl_pct)
-                    trades.append({
-                        'type': 'exit',
-                        'position_type': 'long',
-                        'date': current_date.strftime('%Y-%m-%d'),
-                        'price': current_price,
-                        'reason': 'stop_loss',
-                        'pnl_pct': pnl_pct * 100,
-                        'capital': capital,
-                        'entry_date': entry_date,
-                        'entry_price': entry_price
-                    })
-                    position = 0
-            elif position == -1:  # Short position
-                if current_price >= stop_loss:
-                    # Close position
-                    pnl_pct = (entry_price - current_price) / entry_price
-                    capital = capital * (1 + pnl_pct)
-                    trades.append({
-                        'type': 'exit',
-                        'position_type': 'short',
-                        'date': current_date.strftime('%Y-%m-%d'),
-                        'price': current_price,
-                        'reason': 'stop_loss',
-                        'pnl_pct': pnl_pct * 100,
-                        'capital': capital,
-                        'entry_date': entry_date,
-                        'entry_price': entry_price
-                    })
-                    position = 0
-        
         # Generate signals
-        signal = 0
+        signal = 0  # 0 = hold (close positions), 1 = long, -1 = short
         if pred_6d[i] == 1 and pred_10d[i] == 1:
             signal = 1  # Both predict up
         elif pred_6d[i] == 0 and pred_10d[i] == 0:
             signal = -1  # Both predict down
+        # else: signal = 0 (hold - models disagree)
         
-        # Execute trades based on signals
-        if signal != 0 and signal != position:
+        # If hold signal and we have a position, close it
+        if signal == 0 and position != 0 and not stop_loss_triggered:
+            if position == 1:
+                pnl_pct = (current_price - entry_price) / entry_price
+            else:
+                pnl_pct = (entry_price - current_price) / entry_price
+            capital = capital * (1 + pnl_pct)
+            trades.append({
+                'type': 'exit',
+                'position_type': 'long' if position == 1 else 'short',
+                'date': current_date.strftime('%Y-%m-%d'),
+                'price': current_price,
+                'reason': 'hold_signal',
+                'pnl_pct': pnl_pct * 100,
+                'capital': capital,
+                'entry_date': entry_date,
+                'entry_price': entry_price
+            })
+            position = 0
+        
+        # Execute trades based on signals (only if signal is not hold and position changed)
+        if signal != 0 and signal != position and not stop_loss_triggered:
             # Close existing position if any
             if position != 0:
                 if position == 1:
