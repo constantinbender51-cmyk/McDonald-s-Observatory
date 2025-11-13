@@ -9,7 +9,7 @@ import time
 warnings.filterwarnings('ignore')
 
 # ==================== CONFIGURABLE PARAMETERS ====================
-STOP_LOSS_PERCENT = 8.0  # Adjust this value to change stop loss percentage
+STOP_LOSS_PERCENT = 80.0  # Adjust this value to change stop loss percentage
 # ==================== CONFIGURABLE PARAMETERS ====================
 
 # Step 1: Fetch Bitcoin OHLCV data from Binance
