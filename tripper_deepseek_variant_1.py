@@ -5,10 +5,13 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import warnings
+import time
 warnings.filterwarnings('ignore')
 
 # Step 1: Fetch Bitcoin OHLCV data from Binance
 print("Fetching Bitcoin data from Binance...")
+time.sleep(0.1)
+
 def fetch_bitcoin_data():
     url = "https://api.binance.com/api/v3/klines"
     params = {
@@ -46,9 +49,11 @@ def fetch_bitcoin_data():
 # Fetch data
 btc_data = fetch_bitcoin_data()
 print(f"Fetched {len(btc_data)} days of data")
+time.sleep(0.1)
 
 # Step 2: Calculate technical indicators
 print("Calculating technical indicators...")
+time.sleep(0.1)
 
 # Price change percentages (24 days)
 for i in range(1, 25):
@@ -115,12 +120,15 @@ X = X[valid_indices]
 y = y[valid_indices]
 
 print(f"Total samples after cleaning: {len(X)}")
+time.sleep(0.1)
 
 # Step 5: Split data and train model
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False, random_state=42)
 
 print(f"Training samples: {len(X_train)}")
+time.sleep(0.1)
 print(f"Testing samples: {len(X_test)}")
+time.sleep(0.1)
 
 model = LogisticRegression(random_state=42, max_iter=1000)
 model.fit(X_train, y_train)
@@ -132,9 +140,11 @@ y_pred_proba = model.predict_proba(X_test)[:, 1]
 # Calculate accuracy
 accuracy = accuracy_score(y_test, y_pred)
 print(f"\nModel Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
+time.sleep(0.1)
 
 # Step 7: Simulate trading strategies with confidence threshold
 print("\nSimulating trading strategies...")
+time.sleep(0.1)
 
 def calculate_drawdown(capital_history):
     peak = capital_history[0]
@@ -217,40 +227,66 @@ days_in_market_threshold = trades_threshold
 days_out_of_market = total_days - trades_threshold
 
 print("\n" + "="*60)
+time.sleep(0.1)
 print("TRADING STRATEGY COMPARISON: CONFIDENCE THRESHOLD")
+time.sleep(0.1)
 print("="*60)
+time.sleep(0.1)
 
 print(f"\n📊 MODEL PERFORMANCE:")
+time.sleep(0.1)
 print(f"   Accuracy: {accuracy*100:.2f}%")
+time.sleep(0.1)
 
 print(f"\n⚡ BASIC STRATEGY (Always Invested):")
+time.sleep(0.1)
 print(f"   Final Capital: ${capital_basic:,.2f}")
+time.sleep(0.1)
 print(f"   Total Return: {total_return_basic:+.2f}%")
+time.sleep(0.1)
 print(f"   Maximum Drawdown: {max_drawdown_basic*100:.2f}%")
+time.sleep(0.1)
 print(f"   Total Trades: {trades_basic}")
+time.sleep(0.1)
 print(f"   Days in Market: {total_days} (100%)")
+time.sleep(0.1)
 
 print(f"\n🎯 CONFIDENCE THRESHOLD STRATEGY (10% Threshold):")
+time.sleep(0.1)
 print(f"   Final Capital: ${capital_threshold:,.2f}")
+time.sleep(0.1)
 print(f"   Total Return: {total_return_threshold:+.2f}%")
+time.sleep(0.1)
 print(f"   Maximum Drawdown: {max_drawdown_threshold*100:.2f}%")
+time.sleep(0.1)
 print(f"   Total Trades: {trades_threshold}")
+time.sleep(0.1)
 print(f"   Days in Market: {days_in_market_threshold} ({days_in_market_threshold/total_days*100:.1f}%)")
+time.sleep(0.1)
 print(f"   Days Out of Market: {days_out_of_market} ({days_out_of_market/total_days*100:.1f}%)")
+time.sleep(0.1)
 
 print(f"\n📈 COMPARISON:")
+time.sleep(0.1)
 if capital_threshold > capital_basic:
     improvement = ((capital_threshold - capital_basic) / capital_basic) * 100
     print(f"   ✅ Threshold strategy outperformed by: +{improvement:.2f}%")
+    time.sleep(0.1)
 else:
     improvement = ((capital_basic - capital_threshold) / capital_threshold) * 100
     print(f"   ❌ Basic strategy outperformed by: +{improvement:.2f}%")
+    time.sleep(0.1)
 
 print(f"\n💡 STRATEGY INSIGHTS:")
+time.sleep(0.1)
 print(f"   Basic: Always 100% invested, higher trading frequency")
+time.sleep(0.1)
 print(f"   Threshold: Selective trading, potentially better risk-adjusted returns")
+time.sleep(0.1)
 print(f"   Threshold Rules: Long ≥0.60, Short ≤0.40, Flat between 0.40-0.60")
+time.sleep(0.1)
 print("="*60)
+time.sleep(0.1)
 
 # Additional analysis: Show prediction distribution
 high_conviction_long = len([p for p in y_pred_proba if p >= 0.60])
@@ -258,13 +294,20 @@ high_conviction_short = len([p for p in y_pred_proba if p <= 0.40])
 neutral_zone = len([p for p in y_pred_proba if 0.40 < p < 0.60])
 
 print(f"\n🔍 PREDICTION CONFIDENCE DISTRIBUTION:")
+time.sleep(0.1)
 print(f"   High Conviction Long (≥0.60): {high_conviction_long} trades ({high_conviction_long/len(y_pred_proba)*100:.1f}%)")
+time.sleep(0.1)
 print(f"   High Conviction Short (≤0.40): {high_conviction_short} trades ({high_conviction_short/len(y_pred_proba)*100:.1f}%)")
+time.sleep(0.1)
 print(f"   No Trade Zone (0.40-0.60): {neutral_zone} trades ({neutral_zone/len(y_pred_proba)*100:.1f}%)")
+time.sleep(0.1)
 
 # Calculate win rate for threshold strategy
 if trades_threshold > 0:
     print(f"\n📊 THRESHOLD STRATEGY EFFICIENCY:")
+    time.sleep(0.1)
     print(f"   Trade Frequency: {trades_threshold}/{total_days} days ({trades_threshold/total_days*100:.1f}%)")
+    time.sleep(0.1)
     market_exposure = days_in_market_threshold / total_days * 100
     print(f"   Market Exposure: {market_exposure:.1f}%")
+    time.sleep(0.1)
