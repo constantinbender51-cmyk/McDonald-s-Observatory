@@ -8,6 +8,10 @@ import warnings
 import time
 warnings.filterwarnings('ignore')
 
+# ==================== CONFIGURABLE PARAMETERS ====================
+STOP_LOSS_PERCENT = 8.0  # Adjust this value to change stop loss percentage
+# ==================== CONFIGURABLE PARAMETERS ====================
+
 # Step 1: Fetch Bitcoin OHLCV data from Binance
 print("Fetching Bitcoin data from Binance...")
 time.sleep(0.1)
@@ -142,8 +146,8 @@ accuracy = accuracy_score(y_test, y_pred)
 print(f"\nModel Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
 time.sleep(0.1)
 
-# Step 7: Trading Strategy with 0.8% Threshold and 2% Stop Loss
-print("\nImplementing trading strategy with 0.8% threshold and 2% stop loss...")
+# Step 7: Trading Strategy with 0.8% Threshold and Configurable Stop Loss
+print(f"\nImplementing trading strategy with 0.8% threshold and {STOP_LOSS_PERCENT}% stop loss...")
 time.sleep(0.1)
 print("="*60)
 time.sleep(0.1)
@@ -159,15 +163,12 @@ def calculate_drawdown(capital_history):
             max_dd = dd
     return max_dd
 
-def simulate_strategy_with_stop_loss(y_pred_proba, test_prices):
-    """Simulate trading with 0.8% threshold and 2% stop loss with signal-change re-entry"""
+def simulate_strategy_with_stop_loss(y_pred_proba, test_prices, stop_loss_percent):
+    """Simulate trading with 0.8% threshold and configurable stop loss with signal-change re-entry"""
     # Fixed 0.8% threshold
     threshold = 0.8 / 100.0
     upper_threshold = 0.5 + threshold  # 0.508
     lower_threshold = 0.5 - threshold  # 0.492
-    
-    # Fixed 2% stop loss
-    stop_loss_percent = 2.0
     
     capital = 10000
     capital_history = [capital]
@@ -187,7 +188,7 @@ def simulate_strategy_with_stop_loss(y_pred_proba, test_prices):
         # Check stop loss first if we have a position and not waiting for signal change
         if position != 0 and not waiting_for_signal_change:
             if position == 1:  # Long position
-                # Stop loss if price drops by 2% from entry
+                # Stop loss if price drops by stop_loss_percent from entry
                 price_change_from_entry = (current_price - entry_price) / entry_price * 100
                 if price_change_from_entry <= -stop_loss_percent:
                     # Stop loss triggered - exit position and wait for signal change
@@ -197,7 +198,7 @@ def simulate_strategy_with_stop_loss(y_pred_proba, test_prices):
                     stopped_out_count += 1
                     # No capital change since we're marking-to-market daily
             elif position == -1:  # Short position
-                # Stop loss if price rises by 2% from entry
+                # Stop loss if price rises by stop_loss_percent from entry
                 price_change_from_entry = (current_price - entry_price) / entry_price * 100
                 if price_change_from_entry >= stop_loss_percent:
                     # Stop loss triggered - exit position and wait for signal change
@@ -310,13 +311,15 @@ capital_no_sl, dd_no_sl, return_no_sl, trades_no_sl, exposure_no_sl = simulate_s
 print(f"No Stop Loss - Capital: ${capital_no_sl:,.2f}")
 time.sleep(0.1)
 
-print("\nTesting strategy with 2% stop loss...")
+print(f"\nTesting strategy with {STOP_LOSS_PERCENT}% stop loss...")
 time.sleep(0.1)
-capital_with_sl, dd_with_sl, return_with_sl, trades_with_sl, stopped_count, exposure_with_sl = simulate_strategy_with_stop_loss(y_pred_proba, test_prices)
+capital_with_sl, dd_with_sl, return_with_sl, trades_with_sl, stopped_count, exposure_with_sl = simulate_strategy_with_stop_loss(
+    y_pred_proba, test_prices, STOP_LOSS_PERCENT
+)
 
 print("\n" + "="*60)
 time.sleep(0.1)
-print("TRADING STRATEGY RESULTS - 2% STOP LOSS")
+print(f"TRADING STRATEGY RESULTS - {STOP_LOSS_PERCENT}% STOP LOSS")
 time.sleep(0.1)
 print("="*60)
 time.sleep(0.1)
@@ -334,7 +337,7 @@ print(f"   Go Long if prediction ≥ {0.5 + 0.8/100:.3f}")
 time.sleep(0.1)
 print(f"   Go Short if prediction ≤ {0.5 - 0.8/100:.3f}")
 time.sleep(0.1)
-print(f"   Stop Loss: 2.0% from entry price")
+print(f"   Stop Loss: {STOP_LOSS_PERCENT}% from entry price")
 time.sleep(0.1)
 print(f"   Re-entry Rule: Wait for signal change after stop out")
 time.sleep(0.1)
@@ -352,7 +355,7 @@ time.sleep(0.1)
 print(f"   Market Exposure: {exposure_no_sl:.1f}%")
 time.sleep(0.1)
 
-print(f"\n🛡️ STRATEGY WITH 2% STOP LOSS:")
+print(f"\n🛡️ STRATEGY WITH {STOP_LOSS_PERCENT}% STOP LOSS:")
 time.sleep(0.1)
 print(f"   Final Capital: ${capital_with_sl:,.2f}")
 time.sleep(0.1)
