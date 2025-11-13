@@ -10,8 +10,9 @@ warnings.filterwarnings('ignore')
 # CONFIGURABLE HYPERPARAMETERS
 # =============================================================================
 
-LOOKBACK_DAYS = 10
-TARGET_DAYS_AHEAD = 7
+# Ranges for brute force optimization
+LOOKBACK_DAYS_RANGE = range(5, 31)  # 5 to 30 inclusive
+TARGET_DAYS_AHEAD_RANGE = range(5, 31)  # 5 to 30 inclusive
 
 # =============================================================================
 
@@ -69,7 +70,7 @@ def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k=3, d=3):
     
     return stoch_rsi
 
-def create_features_and_target(df):
+def create_features_and_target(df, lookback_days, target_days_ahead):
     """Create features and target variable"""
     # Calculate price change percentages
     df['price_pct_change'] = df['close'].pct_change()
@@ -84,30 +85,30 @@ def create_features_and_target(df):
     # Calculate Stochastic RSI
     df['stoch_rsi'] = calculate_stochastic_rsi(df)
     
-    # Create target: price change direction after TARGET_DAYS_AHEAD days
-    df['future_price'] = df['close'].shift(-TARGET_DAYS_AHEAD)
+    # Create target: price change direction after target_days_ahead days
+    df['future_price'] = df['close'].shift(-target_days_ahead)
     df['price_change_direction'] = (df['future_price'] > df['close']).astype(int)
     
-    # Create feature columns for last LOOKBACK_DAYS of each indicator
+    # Create feature columns for last lookback_days of each indicator
     feature_columns = []
     
-    # LOOKBACK_DAYS of price change percentages
-    for i in range(1, LOOKBACK_DAYS + 1):
+    # lookback_days of price change percentages
+    for i in range(1, lookback_days + 1):
         df[f'price_pct_change_lag_{i}'] = df['price_pct_change'].shift(i)
         feature_columns.append(f'price_pct_change_lag_{i}')
     
-    # LOOKBACK_DAYS of volume change percentages
-    for i in range(1, LOOKBACK_DAYS + 1):
+    # lookback_days of volume change percentages
+    for i in range(1, lookback_days + 1):
         df[f'volume_pct_change_lag_{i}'] = df['volume_pct_change'].shift(i)
         feature_columns.append(f'volume_pct_change_lag_{i}')
     
-    # LOOKBACK_DAYS of MACD - Signal differences
-    for i in range(1, LOOKBACK_DAYS + 1):
+    # lookback_days of MACD - Signal differences
+    for i in range(1, lookback_days + 1):
         df[f'macd_signal_diff_lag_{i}'] = df['macd_signal_diff'].shift(i)
         feature_columns.append(f'macd_signal_diff_lag_{i}')
     
-    # LOOKBACK_DAYS of Stochastic RSI values
-    for i in range(1, LOOKBACK_DAYS + 1):
+    # lookback_days of Stochastic RSI values
+    for i in range(1, lookback_days + 1):
         df[f'stoch_rsi_lag_{i}'] = df['stoch_rsi'].shift(i)
         feature_columns.append(f'stoch_rsi_lag_{i}')
     
@@ -116,52 +117,126 @@ def create_features_and_target(df):
     
     return df_clean, feature_columns
 
+def evaluate_hyperparameters(lookback_days, target_days_ahead, df):
+    """Evaluate model performance for given hyperparameters"""
+    try:
+        # Create features and target
+        df_clean, feature_columns = create_features_and_target(df.copy(), lookback_days, target_days_ahead)
+        
+        # Check if we have enough data
+        if len(df_clean) < 100:
+            return None, None, None
+        
+        # Prepare data for training
+        X = df_clean[feature_columns]
+        y = df_clean['price_change_direction']
+        
+        # Split data (chronological split)
+        split_index = int(len(X) * 0.8)
+        X_train = X.iloc[:split_index]
+        X_test = X.iloc[split_index:]
+        y_train = y.iloc[:split_index]
+        y_test = y.iloc[split_index:]
+        
+        # Check if we have enough test samples
+        if len(X_test) < 50:
+            return None, None, None
+        
+        # Train logistic regression model
+        model = LogisticRegression(random_state=42, max_iter=1000)
+        model.fit(X_train, y_train)
+        
+        # Make predictions and calculate accuracy
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
+        # Calculate baseline accuracy
+        baseline_accuracy = max(y_test.mean(), 1 - y_test.mean())
+        improvement = accuracy - baseline_accuracy
+        
+        return accuracy, baseline_accuracy, improvement
+        
+    except Exception as e:
+        print(f"Error with lookback={lookback_days}, target={target_days_ahead}: {e}")
+        return None, None, None
+
 def main():
     print("Fetching Bitcoin data from Binance...")
     df = fetch_bitcoin_data()
     print(f"Fetched {len(df)} days of data")
     
-    print("\nCreating features and target variable...")
-    print(f"Lookback days: {LOOKBACK_DAYS}")
-    print(f"Target days ahead: {TARGET_DAYS_AHEAD}")
+    print("\nStarting brute force hyperparameter optimization...")
+    print(f"Lookback days range: {LOOKBACK_DAYS_RANGE}")
+    print(f"Target days ahead range: {TARGET_DAYS_AHEAD_RANGE}")
+    print(f"Total combinations to test: {len(LOOKBACK_DAYS_RANGE) * len(TARGET_DAYS_AHEAD_RANGE)}")
     
-    df_clean, feature_columns = create_features_and_target(df)
-    print(f"After cleaning: {len(df_clean)} samples with {len(feature_columns)} features")
+    results = []
+    best_accuracy = 0
+    best_params = None
     
-    # Prepare data for training
-    X = df_clean[feature_columns]
-    y = df_clean['price_change_direction']
+    # Test all combinations
+    for lookback_days in LOOKBACK_DAYS_RANGE:
+        for target_days_ahead in TARGET_DAYS_AHEAD_RANGE:
+            print(f"Testing: lookback={lookback_days}, target={target_days_ahead}")
+            
+            accuracy, baseline, improvement = evaluate_hyperparameters(lookback_days, target_days_ahead, df)
+            
+            if accuracy is not None:
+                results.append({
+                    'lookback_days': lookback_days,
+                    'target_days_ahead': target_days_ahead,
+                    'accuracy': accuracy,
+                    'baseline_accuracy': baseline,
+                    'improvement': improvement,
+                    'total_features': lookback_days * 4  # 4 feature types
+                })
+                
+                # Update best parameters
+                if accuracy > best_accuracy:
+                    best_accuracy = accuracy
+                    best_params = (lookback_days, target_days_ahead)
+                
+                print(f"  Accuracy: {accuracy:.4f}, Improvement: {improvement:.4f}")
+            else:
+                print(f"  Skipped - insufficient data")
     
-    # Split data (chronological split - earlier data for training, later for testing)
-    split_index = int(len(X) * 0.8)
-    X_train = X.iloc[:split_index]
-    X_test = X.iloc[split_index:]
-    y_train = y.iloc[:split_index]
-    y_test = y.iloc[split_index:]
+    # Create results DataFrame
+    results_df = pd.DataFrame(results)
     
-    print(f"\nTraining samples: {len(X_train)}")
-    print(f"Testing samples: {len(X_test)}")
+    if len(results_df) == 0:
+        print("No valid results found. Please check the data.")
+        return
     
-    # Train logistic regression model
-    print("\nTraining Logistic Regression model...")
-    model = LogisticRegression(random_state=42, max_iter=1000)
-    model.fit(X_train, y_train)
+    # Sort by accuracy (descending)
+    results_df = results_df.sort_values('accuracy', ascending=False)
     
-    # Make predictions
-    y_pred = model.predict(X_test)
+    print("\n" + "="*80)
+    print("BRUTE FORCE OPTIMIZATION RESULTS")
+    print("="*80)
     
-    # Calculate accuracy
-    accuracy = accuracy_score(y_test, y_pred)
+    # Display top 10 results
+    print("\nTop 10 Parameter Combinations:")
+    print(results_df.head(10).round(4).to_string(index=False))
     
-    print(f"\nResults:")
-    print(f"Prediction Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
+    # Best result
+    best_result = results_df.iloc[0]
+    print(f"\nBEST COMBINATION:")
+    print(f"Lookback Days: {best_result['lookback_days']}")
+    print(f"Target Days Ahead: {best_result['target_days_ahead']}")
+    print(f"Accuracy: {best_result['accuracy']:.4f} ({best_result['accuracy']*100:.2f}%)")
+    print(f"Baseline Accuracy: {best_result['baseline_accuracy']:.4f} ({best_result['baseline_accuracy']*100:.2f}%)")
+    print(f"Improvement: {best_result['improvement']:.4f} ({best_result['improvement']*100:.2f}%)")
+    print(f"Total Features: {best_result['total_features']}")
     
-    # Additional metrics
-    baseline_accuracy = max(y_test.mean(), 1 - y_test.mean())
-    print(f"Baseline Accuracy (majority class): {baseline_accuracy:.4f} ({baseline_accuracy*100:.2f}%)")
-    print(f"Model Improvement: {(accuracy - baseline_accuracy)*100:.2f}%")
+    # Summary statistics
+    print(f"\nSUMMARY STATISTICS:")
+    print(f"Total combinations tested: {len(LOOKBACK_DAYS_RANGE) * len(TARGET_DAYS_AHEAD_RANGE)}")
+    print(f"Valid results: {len(results_df)}")
+    print(f"Average accuracy: {results_df['accuracy'].mean():.4f}")
+    print(f"Maximum accuracy: {results_df['accuracy'].max():.4f}")
+    print(f"Minimum accuracy: {results_df['accuracy'].min():.4f}")
     
-    return model, X, y, df_clean
+    return results_df
 
 if __name__ == "__main__":
-    model, X, y, df_clean = main()
+    results_df = main()
