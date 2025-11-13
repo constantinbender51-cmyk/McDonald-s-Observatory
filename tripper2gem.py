@@ -2,7 +2,7 @@ import ccxt
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier # New import
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, classification_report
 import time
@@ -82,7 +82,7 @@ def create_features_and_target(df, window=28, prediction_horizon=7):
     return df_clean, features
 
 def train_and_evaluate_two_models(df, feature_cols):
-    """Trains and evaluates two Logistic Regression models (UP and DOWN)."""
+    """Trains and evaluates two Random Forest models (UP and DOWN)."""
     
     X = df[feature_cols]
     
@@ -91,44 +91,47 @@ def train_and_evaluate_two_models(df, feature_cols):
     X_train = X.iloc[:split_point]
     X_test = X.iloc[split_point:]
     
-    # Scale features
+    # Random Forest models are less sensitive to scaling, but we'll apply it anyway
+    # for cleaner feature weights if we inspect them later.
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
 
     # =========================================================================
-    # 1. MODEL UP (Predicting Price Increase)
+    # 1. MODEL UP (Predicting Price Increase) - Random Forest
     # =========================================================================
     y_up = df['target_up']
     y_up_train = y_up.iloc[:split_point]
     y_up_test = y_up.iloc[split_point:]
     
-    model_up = LogisticRegression(random_state=42, max_iter=1000)
+    # Using RandomForestClassifier with default settings
+    model_up = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced') # Added class_weight
     model_up.fit(X_train_scaled, y_up_train)
     y_pred_up = model_up.predict(X_test_scaled)
     acc_up = accuracy_score(y_up_test, y_pred_up)
     
     print(f"\n{'='*60}")
-    print("MODEL 1: PREDICTING PRICE INCREASE (Target: future price > current price)")
+    print("MODEL 1: RANDOM FOREST (Predicting Price Increase)")
     print(f"{'='*60}")
     print(f"Overall Test Accuracy: {acc_up:.4f} ({acc_up*100:.2f}%)")
     print("\nClassification Report (0: Not Up, 1: Up):")
     print(classification_report(y_up_test, y_pred_up, zero_division=0))
 
     # =========================================================================
-    # 2. MODEL DOWN (Predicting Price Decrease)
+    # 2. MODEL DOWN (Predicting Price Decrease) - Random Forest
     # =========================================================================
     y_down = df['target_down']
     y_down_train = y_down.iloc[:split_point]
     y_down_test = y_down.iloc[split_point:]
     
-    model_down = LogisticRegression(random_state=42, max_iter=1000)
+    # Using RandomForestClassifier with default settings
+    model_down = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced') # Added class_weight
     model_down.fit(X_train_scaled, y_down_train)
     y_pred_down = model_down.predict(X_test_scaled)
     acc_down = accuracy_score(y_down_test, y_pred_down)
     
     print(f"\n{'='*60}")
-    print("MODEL 2: PREDICTING PRICE DECREASE (Target: future price < current price)")
+    print("MODEL 2: RANDOM FOREST (Predicting Price Decrease)")
     print(f"{'='*60}")
     print(f"Overall Test Accuracy: {acc_down:.4f} ({acc_down*100:.2f}%)")
     print("\nClassification Report (0: Not Down, 1: Down):")
