@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 
 # Set random seed for reproducibility
 np.random.seed(42)
@@ -34,38 +34,47 @@ def create_time_lagged_features(data1, data2, target, window_size):
         y.append(target[i])
     return np.array(X), np.array(y)
 
-# Evaluate with proper train/test split
-window_sizes = [1, 3, 5, 10, 20]
+# Test much larger window sizes
+window_sizes = [1, 5, 10, 20, 30, 40, 50, 75, 100]
 
-print("Proper evaluation with train/test split:")
-print("=" * 60)
+print("Testing larger window sizes:")
+print("=" * 70)
+print(f"{'Window':>8} {'Features':>10} {'Train R²':>10} {'Test R²':>10} {'Gap':>8}")
 
 for window_size in window_sizes:
     X, y = create_time_lagged_features(noisy_col1, noisy_col2, col3, window_size)
     
-    # Split into train and test sets
+    # We need enough samples for train/test split with large windows
+    if len(X) < 200:
+        continue
+        
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
     
     model = LinearRegression()
     model.fit(X_train, y_train)
     
-    # Test on unseen data
-    y_pred = model.predict(X_test)
-    r2_test = r2_score(y_test, y_pred)
-    
-    # Also check training performance for comparison
     y_pred_train = model.predict(X_train)
-    r2_train = r2_score(y_train, y_pred_train)
+    y_pred_test = model.predict(X_test)
     
-    print(f"Window: {window_size:2d} | Features: {window_size * 2:2d} | "
-          f"Train R²: {r2_train:.4f} | Test R²: {r2_test:.4f} | "
-          f"Gap: {r2_train - r2_test:+.4f}")
+    r2_train = r2_score(y_train, y_pred_train)
+    r2_test = r2_score(y_test, y_pred_test)
+    
+    print(f"{window_size:>8} {window_size * 2:>10} {r2_train:>10.4f} {r2_test:>10.4f} {r2_train - r2_test:>8.4f}")
 
-# Cross-validation for more robust evaluation
-print("\n" + "=" * 60)
-print("Cross-validation results (more reliable):")
-for window_size in [1, 5, 10]:
-    X, y = create_time_lagged_features(noisy_col1, noisy_col2, col3, window_size)
-    model = LinearRegression()
-    cv_scores = cross_val_score(model, X, y, cv=5, scoring='r2')
-    print(f"Window: {window_size:2d} | CV R²: {cv_scores.mean():.4f} (±{cv_scores.std():.4f})")
+# Let's also check what happens at the theoretical limit
+print("\n" + "=" * 70)
+print("Theoretical maximum performance:")
+# If we could perfectly denoise, what's the best possible R²?
+perfect_features = np.column_stack((underlying_col1, underlying_col2))
+perfect_X, perfect_y = create_time_lagged_features(underlying_col1, underlying_col2, col3, 1)
+perfect_X_train, perfect_X_test, perfect_y_train, perfect_y_test = train_test_split(
+    perfect_X, perfect_y, test_size=0.3, random_state=42)
+
+perfect_model = LinearRegression()
+perfect_model.fit(perfect_X_train, perfect_y_train)
+perfect_pred = perfect_model.predict(perfect_X_test)
+perfect_r2 = r2_score(perfect_y_test, perfect_pred)
+
+print(f"With perfect noise-free data: R² = {perfect_r2:.6f}")
+print(f"Theoretical coefficients should be: [{2/3:.4f}, {1/3:.4f}]")
+print(f"Actual coefficients learned: [{perfect_model.coef_[0]:.4f}, {perfect_model.coef_[1]:.4f}]")
