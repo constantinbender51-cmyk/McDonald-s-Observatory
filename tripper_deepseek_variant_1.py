@@ -1,168 +1,158 @@
-import pandas as pd
+#!/usr/bin/env python3
+"""
+Binance-weekly-direction-logreg.py
+Fetch daily OHLCV from Binance since 2018-01-01, engineer 28-day look-back
+features (price & volume %-changes, MACD, Signal, Stoch-RSI), train a
+logistic-regression classifier to predict the *sign* of the 7-day-forward
+price change, evaluate on a 20 % hold-out test set (time-series split).
+
+Requires:  python-binance, pandas, numpy, ta, scikit-learn
+Install:   pip install python-binance pandas numpy ta scikit-learn
+"""
+
+import os
+from datetime import datetime, timedelta
 import numpy as np
+import pandas as pd
 from binance.client import Client
+from ta.momentum import StochRSIIndicator
+from ta.trend import MACD
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split
-import warnings
-warnings.filterwarnings('ignore')
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
 
-def fetch_bitcoin_data_binance():
-    """Fetch Bitcoin daily price data from Binance"""
-    print("Fetching Bitcoin data from Binance...")
-    
-    # Initialize Binance client (no API key needed for public data)
-    client = Client()
-    
-    # Fetch daily BTC/USDT data from January 1, 2018
+# --------------------------------------------------
+# 1. Parameters
+# --------------------------------------------------
+START_DATE = "1 Jan 2018"
+SYMBOL     = "BTCUSDT"
+LOOKBACK   = 28          # days of history for features
+HORIZON    = 7           # days ahead we want to predict
+TEST_SIZE  = 0.20        # 20 % test split
+RANDOM_STATE = 42
+
+# --------------------------------------------------
+# 2. Helper: download daily klines
+# --------------------------------------------------
+def fetch_daily_klines(client, symbol, start_str):
+    """Return a DataFrame with daily OHLCV from Binance."""
     klines = client.get_historical_klines(
-        symbol="BTCUSDT",
+        symbol=symbol,
         interval=Client.KLINE_INTERVAL_1DAY,
-        start_str="1 Jan, 2018"
+        start_str=start_str,
+        klines_type=client.HISTORICAL_KLINES_TYPE_SPOT
     )
-    
-    # Convert to DataFrame
-    columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 
-               'close_time', 'quote_asset_volume', 'number_of_trades',
-               'taker_buy_base_volume', 'taker_buy_quote_volume', 'ignore']
-    
-    df = pd.DataFrame(klines, columns=columns)
-    
-    # Convert types and set index
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-    
-    # Convert price and volume to float
-    for col in ['open', 'high', 'low', 'close', 'volume']:
-        df[col] = df[col].astype(float)
-    
-    # Keep only necessary columns and rename to match previous structure
-    df = df[['open', 'high', 'low', 'close', 'volume']]
-    df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-    
-    print(f"Fetched {len(df)} days of data")
+    df = pd.DataFrame(
+        klines,
+        columns=[
+            "open_time", "open", "high", "low", "close", "volume",
+            "close_time", "quote_av", "trades", "taker_base_vol",
+            "taker_quote_vol", "ignore"
+        ]
+    )
+    df["open_time"] = pd.to_datetime(df["open_time"], unit="ms")
+    df = df[["open_time", "open", "high", "low", "close", "volume"]]
+    for c in ["open", "high", "low", "close", "volume"]:
+        df[c] = pd.to_numeric(df[c])
+    df.set_index("open_time", inplace=True)
+    df.sort_index(inplace=True)
     return df
 
-def calculate_technical_indicators(df):
-    """Calculate technical indicators for the dataset"""
-    # Calculate daily percentage changes (for the lookback window)
-    df['daily_price_pct'] = df['Close'].pct_change()
-    df['daily_volume_pct'] = df['Volume'].pct_change()
-    
-    # MACD (12, 26, 9)
-    exp1 = df['Close'].ewm(span=12).mean()
-    exp2 = df['Close'].ewm(span=26).mean()
-    df['macd'] = exp1 - exp2
-    df['macd_signal'] = df['macd'].ewm(span=9).mean()
-    df['macd_histogram'] = df['macd'] - df['macd_signal']
-    
-    # Stochastic RSI (14, 14, 3, 3)
-    # Calculate RSI
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['rsi'] = 100 - (100 / (1 + rs))
-    
-    # Calculate Stochastic RSI
-    rsi_min = df['rsi'].rolling(window=14).min()
-    rsi_max = df['rsi'].rolling(window=14).max()
-    df['stoch_rsi'] = (df['rsi'] - rsi_min) / (rsi_max - rsi_min)
-    df['stoch_rsi_k'] = df['stoch_rsi'].rolling(window=3).mean()
-    
+# --------------------------------------------------
+# 3. Feature engineering
+# --------------------------------------------------
+def add_technical_indicators(df):
+    """Append MACD and Stoch-RSI columns."""
+    close = df["close"]
+    macd = MACD(close=close, window_slow=26, window_fast=12, window_sign=9)
+    df["macd"]      = macd.macd()
+    df["macd_sig"]  = macd.macd_signal()
+
+    stoch_rsi = StochRSIIndicator(close=close, window=14)
+    df["stoch_rsi"] = stoch_rsi.stochrsi()
     return df
 
-def create_target_variable(df, period=7):
-    """Create target variable: direction of price change over next 7 days"""
-    # Calculate future price change
-    future_return = df['Close'].pct_change(period).shift(-period)
-    
-    # Create binary target (1 if price goes up, 0 if down)
-    df['target'] = (future_return > 0).astype(int)
-    return df
+def build_features(df):
+    """Create 28-day look-back feature matrix."""
+    df = add_technical_indicators(df)
 
-def create_3d_features(df, lookback=10):
-    """
-    Create 3D feature matrix with shape (n_samples, 4, lookback)
-    Each sample has 4 features over 10 days lookback period
-    """
-    features_list = []
-    targets_list = []
-    
-    # Features to include in the lookback window
-    feature_columns = ['daily_price_pct', 'daily_volume_pct', 'macd_histogram', 'stoch_rsi_k']
-    
-    for i in range(lookback, len(df) - 7):  # -7 for the 7-day target
-        # Extract lookback window for each feature
-        feature_matrix = []
-        for feature in feature_columns:
-            feature_values = df[feature].iloc[i-lookback:i].values
-            feature_matrix.append(feature_values)
-        
-        # Stack to create (4, lookback) matrix
-        feature_matrix = np.array(feature_matrix)
-        
-        # Only include if no NaN values
-        if not np.any(np.isnan(feature_matrix)) and not np.isnan(df['target'].iloc[i]):
-            features_list.append(feature_matrix)
-            targets_list.append(df['target'].iloc[i])
-    
-    # Convert to numpy arrays
-    X = np.array(features_list)
-    y = np.array(targets_list)
-    
-    return X, y
+    # %-changes
+    df["ret"]  = df["close"].pct_change()
+    df["vol_ch"] = df["volume"].pct_change()
 
+    # Target: sign of 7-day forward return
+    df["fwd_ret"]  = df["close"].shift(-HORIZON) / df["close"] - 1
+    df["target"]   = np.where(df["fwd_ret"] > 0, 1, 0)
+
+    # Collect lags
+    feat_cols = []
+    for lag in range(1, LOOKBACK):
+        df[f"ret_lag{lag}"] = df["ret"].shift(lag)
+        feat_cols.append(f"ret_lag{lag}")
+
+    for lag in range(1, LOOKBACK):
+        df[f"vol_ch_lag{lag}"] = df["vol_ch"].shift(lag)
+        feat_cols.append(f"vol_ch_lag{lag}")
+
+    for lag in range(1, LOOKBACK):
+        df[f"macd_lag{lag}"] = df["macd"].shift(lag)
+        feat_cols.append(f"macd_lag{lag}")
+
+    for lag in range(1, LOOKBACK):
+        df[f"macd_sig_lag{lag}"] = df["macd_sig"].shift(lag)
+        feat_cols.append(f"macd_sig_lag{lag}")
+
+    for lag in range(1, LOOKBACK):
+        df[f"stoch_rsi_lag{lag}"] = df["stoch_rsi"].shift(lag)
+        feat_cols.append(f"stoch_rsi_lag{lag}")
+
+    # Drop rows with NaN
+    df.dropna(inplace=True)
+    return df, feat_cols
+
+# --------------------------------------------------
+# 4. Main
+# --------------------------------------------------
 def main():
-    # Step 1: Fetch data from Binance
-    btc_data = fetch_bitcoin_data_binance()
-    
-    # Step 2: Calculate indicators
-    btc_data = calculate_technical_indicators(btc_data)
-    
-    # Step 3: Create target variable
-    btc_data = create_target_variable(btc_data, period=7)
-    
-    # Step 4: Create 3D features with 10-day lookback
-    X, y = create_3d_features(btc_data, lookback=10)
-    
-    print(f"\nDataset shape: {X.shape}")  # Should be (n_samples, 4, 10)
-    print(f"Target shape: {y.shape}")
-    print(f"Target distribution:\n{pd.Series(y).value_counts(normalize=True)}")
-    
-    # Reshape X from 3D to 2D for logistic regression
-    # From (n_samples, 4, 10) to (n_samples, 4 * 10) = (n_samples, 40)
-    X_2d = X.reshape(X.shape[0], -1)
-    
-    # Step 5: Split data (80% train, 20% test) - without shuffling to maintain time order
-    split_idx = int(0.8 * len(X_2d))
-    X_train, X_test = X_2d[:split_idx], X_2d[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
-    
-    # Step 6: Train logistic regression
-    print("\nTraining logistic regression model...")
-    model = LogisticRegression(random_state=42, max_iter=1000)
+    # Read API key/secret from env vars (optional)
+    api_key    = os.getenv("BINANCE_KEY")
+    api_secret = os.getenv("BINANCE_SECRET")
+    client = Client(api_key=api_key, api_secret=api_secret)
+
+    print("Downloading daily klines …")
+    df = fetch_daily_klines(client, SYMBOL, START_DATE)
+    print(f"Raw data rows: {len(df)}")
+
+    print("Building features …")
+    df, feat_cols = build_features(df)
+    print(f"Usable rows after feature engineering: {len(df)}")
+
+    # Train/test split (time-series)
+    split_idx = int(len(df) * (1 - TEST_SIZE))
+    train_df  = df.iloc[:split_idx]
+    test_df   = df.iloc[split_idx:]
+
+    X_train = train_df[feat_cols]
+    y_train = train_df["target"]
+    X_test  = test_df[feat_cols]
+    y_test  = test_df["target"]
+
+    print(f"Train size: {len(X_train)}, Test size: {len(X_test)}")
+
+    # Model pipeline: standardize + logistic regression
+    model = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(max_iter=1000, random_state=RANDOM_STATE)
+    )
+
+    print("Training logistic regression …")
     model.fit(X_train, y_train)
-    
-    # Step 7: Make predictions and calculate accuracy
-    train_predictions = model.predict(X_train)
-    test_predictions = model.predict(X_test)
-    
-    train_accuracy = accuracy_score(y_train, train_predictions)
-    test_accuracy = accuracy_score(y_test, test_predictions)
-    
-    print("\n" + "="*50)
-    print("RESULTS")
-    print("="*50)
-    print(f"Training Accuracy: {train_accuracy:.4f} ({train_accuracy*100:.2f}%)")
-    print(f"Testing Accuracy: {test_accuracy:.4f} ({test_accuracy*100:.2f}%)")
-    print(f"Training samples: {len(X_train)}")
-    print(f"Testing samples: {len(X_test)}")
-    print(f"Feature matrix shape: {X.shape}")
-    
-    # Baseline accuracy (always predicting the majority class)
-    baseline_accuracy = max(np.mean(y_test), 1 - np.mean(y_test))
-    print(f"Baseline accuracy: {baseline_accuracy:.4f} ({baseline_accuracy*100:.2f}%)")
+
+    preds = model.predict(X_test)
+    acc   = accuracy_score(y_test, preds)
+
+    print(f"Test-set accuracy: {acc:.4f}")
 
 if __name__ == "__main__":
     main()
