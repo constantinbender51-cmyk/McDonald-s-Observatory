@@ -142,8 +142,8 @@ accuracy = accuracy_score(y_test, y_pred)
 print(f"\nModel Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
 time.sleep(0.1)
 
-# Step 7: Trading Strategy with 0.8% Threshold (No Stop Loss)
-print("\nImplementing trading strategy with 0.8% threshold...")
+# Step 7: Trading Strategy with 0.8% Threshold and 2% Stop Loss
+print("\nImplementing trading strategy with 0.8% threshold and 2% stop loss...")
 time.sleep(0.1)
 print("="*60)
 time.sleep(0.1)
@@ -159,32 +159,81 @@ def calculate_drawdown(capital_history):
             max_dd = dd
     return max_dd
 
-def simulate_strategy(y_pred_proba, test_prices):
-    """Simulate trading with 0.8% threshold"""
+def simulate_strategy_with_stop_loss(y_pred_proba, test_prices):
+    """Simulate trading with 0.8% threshold and 2% stop loss with signal-change re-entry"""
     # Fixed 0.8% threshold
     threshold = 0.8 / 100.0
     upper_threshold = 0.5 + threshold  # 0.508
     lower_threshold = 0.5 - threshold  # 0.492
     
+    # Fixed 2% stop loss
+    stop_loss_percent = 2.0
+    
     capital = 10000
     capital_history = [capital]
     trades = 0
+    stopped_out_count = 0
     
+    # Trading state variables
     position = 0  # 0: flat, 1: long, -1: short
+    entry_price = 0
+    waiting_for_signal_change = False
+    last_position_direction = 0  # 0: none, 1: long, -1: short
     
     for i in range(len(y_pred_proba)):
         current_price = test_prices.iloc[i]
         prediction_prob = y_pred_proba[i]
         
-        # Determine position based on 0.8% threshold
-        if prediction_prob >= upper_threshold:
-            position = 1  # Long
-            trades += 1
-        elif prediction_prob <= lower_threshold:
-            position = -1  # Short
-            trades += 1
-        else:
-            position = 0  # Flat
+        # Check stop loss first if we have a position and not waiting for signal change
+        if position != 0 and not waiting_for_signal_change:
+            if position == 1:  # Long position
+                # Stop loss if price drops by 2% from entry
+                price_change_from_entry = (current_price - entry_price) / entry_price * 100
+                if price_change_from_entry <= -stop_loss_percent:
+                    # Stop loss triggered - exit position and wait for signal change
+                    position = 0
+                    waiting_for_signal_change = True
+                    last_position_direction = 1  # Remember we were stopped from long
+                    stopped_out_count += 1
+                    # No capital change since we're marking-to-market daily
+            elif position == -1:  # Short position
+                # Stop loss if price rises by 2% from entry
+                price_change_from_entry = (current_price - entry_price) / entry_price * 100
+                if price_change_from_entry >= stop_loss_percent:
+                    # Stop loss triggered - exit position and wait for signal change
+                    position = 0
+                    waiting_for_signal_change = True
+                    last_position_direction = -1  # Remember we were stopped from short
+                    stopped_out_count += 1
+                    # No capital change since we're marking-to-market daily
+        
+        # Handle position entry based on prediction and waiting state
+        if position == 0 and not waiting_for_signal_change:
+            # Normal entry: follow prediction with 0.8% threshold
+            if prediction_prob >= upper_threshold:
+                position = 1  # Long
+                entry_price = current_price
+                trades += 1
+            elif prediction_prob <= lower_threshold:
+                position = -1  # Short
+                entry_price = current_price
+                trades += 1
+                
+        elif position == 0 and waiting_for_signal_change:
+            # Waiting for signal change after stop out
+            if last_position_direction == 1:  # Stopped from long, wait for short signal
+                if prediction_prob <= lower_threshold:  # Short signal
+                    position = -1  # Enter short
+                    entry_price = current_price
+                    waiting_for_signal_change = False
+                    trades += 1
+            elif last_position_direction == -1:  # Stopped from short, wait for long signal
+                if prediction_prob >= upper_threshold:  # Long signal
+                    position = 1  # Enter long
+                    entry_price = current_price
+                    waiting_for_signal_change = False
+                    trades += 1
+            # If no signal change, remain flat
         
         # Calculate daily return based on current position
         if i < len(y_pred_proba) - 1:
@@ -204,18 +253,70 @@ def simulate_strategy(y_pred_proba, test_prices):
     total_return = (capital - 10000) / 10000 * 100
     market_exposure = trades / len(y_pred_proba) * 100
     
-    return capital, max_drawdown, total_return, trades, market_exposure
+    return capital, max_drawdown, total_return, trades, stopped_out_count, market_exposure
 
 # Get test prices
 test_dates = X_test.index
 test_prices = btc_data.loc[test_dates, 'close']
 
-# Simulate strategy with 0.8% threshold
-capital, max_dd, total_return, trades, exposure = simulate_strategy(y_pred_proba, test_prices)
+# Simulate strategy without stop loss for comparison
+def simulate_strategy_no_stop_loss(y_pred_proba, test_prices):
+    """Simulate trading with 0.8% threshold but no stop loss"""
+    threshold = 0.8 / 100.0
+    upper_threshold = 0.5 + threshold
+    lower_threshold = 0.5 - threshold
+    
+    capital = 10000
+    capital_history = [capital]
+    trades = 0
+    
+    position = 0
+    
+    for i in range(len(y_pred_proba)):
+        current_price = test_prices.iloc[i]
+        prediction_prob = y_pred_proba[i]
+        
+        # Determine position based on 0.8% threshold
+        if prediction_prob >= upper_threshold:
+            position = 1
+            trades += 1
+        elif prediction_prob <= lower_threshold:
+            position = -1
+            trades += 1
+        else:
+            position = 0
+        
+        # Calculate daily return
+        if i < len(y_pred_proba) - 1:
+            next_price = test_prices.iloc[i + 1]
+            daily_return = (next_price - current_price) / current_price
+            
+            if position == 1:
+                capital *= (1 + daily_return)
+            elif position == -1:
+                capital *= (1 - daily_return)
+        
+        capital_history.append(capital)
+    
+    max_drawdown = calculate_drawdown(capital_history)
+    total_return = (capital - 10000) / 10000 * 100
+    market_exposure = trades / len(y_pred_proba) * 100
+    
+    return capital, max_drawdown, total_return, trades, market_exposure
+
+print("\nTesting strategy without stop loss...")
+time.sleep(0.1)
+capital_no_sl, dd_no_sl, return_no_sl, trades_no_sl, exposure_no_sl = simulate_strategy_no_stop_loss(y_pred_proba, test_prices)
+print(f"No Stop Loss - Capital: ${capital_no_sl:,.2f}")
+time.sleep(0.1)
+
+print("\nTesting strategy with 2% stop loss...")
+time.sleep(0.1)
+capital_with_sl, dd_with_sl, return_with_sl, trades_with_sl, stopped_count, exposure_with_sl = simulate_strategy_with_stop_loss(y_pred_proba, test_prices)
 
 print("\n" + "="*60)
 time.sleep(0.1)
-print("FINAL TRADING STRATEGY RESULTS")
+print("TRADING STRATEGY RESULTS - 2% STOP LOSS")
 time.sleep(0.1)
 print("="*60)
 time.sleep(0.1)
@@ -233,38 +334,64 @@ print(f"   Go Long if prediction ≥ {0.5 + 0.8/100:.3f}")
 time.sleep(0.1)
 print(f"   Go Short if prediction ≤ {0.5 - 0.8/100:.3f}")
 time.sleep(0.1)
-print(f"   Stay Flat if prediction between {0.5 - 0.8/100:.3f} and {0.5 + 0.8/100:.3f}")
+print(f"   Stop Loss: 2.0% from entry price")
+time.sleep(0.1)
+print(f"   Re-entry Rule: Wait for signal change after stop out")
 time.sleep(0.1)
 
-print(f"\n💰 TRADING RESULTS:")
+print(f"\n⚡ STRATEGY WITHOUT STOP LOSS:")
 time.sleep(0.1)
-print(f"   Start Capital: $10,000")
+print(f"   Final Capital: ${capital_no_sl:,.2f}")
 time.sleep(0.1)
-print(f"   Final Capital: ${capital:,.2f}")
+print(f"   Total Return: {return_no_sl:+.2f}%")
 time.sleep(0.1)
-print(f"   Total Return: {total_return:+.2f}%")
+print(f"   Maximum Drawdown: {dd_no_sl*100:.2f}%")
 time.sleep(0.1)
-print(f"   Maximum Drawdown: {max_dd*100:.2f}%")
+print(f"   Total Trades: {trades_no_sl}")
 time.sleep(0.1)
-print(f"   Total Trades: {trades}")
-time.sleep(0.1)
-print(f"   Market Exposure: {exposure:.1f}%")
+print(f"   Market Exposure: {exposure_no_sl:.1f}%")
 time.sleep(0.1)
 
-print(f"\n📈 PERFORMANCE ANALYSIS:")
+print(f"\n🛡️ STRATEGY WITH 2% STOP LOSS:")
 time.sleep(0.1)
-if total_return > 0:
-    print(f"   ✅ Strategy was profitable")
+print(f"   Final Capital: ${capital_with_sl:,.2f}")
+time.sleep(0.1)
+print(f"   Total Return: {return_with_sl:+.2f}%")
+time.sleep(0.1)
+print(f"   Maximum Drawdown: {dd_with_sl*100:.2f}%")
+time.sleep(0.1)
+print(f"   Total Trades: {trades_with_sl}")
+time.sleep(0.1)
+print(f"   Times Stopped Out: {stopped_count}")
+time.sleep(0.1)
+print(f"   Stop Out Rate: {stopped_count/trades_with_sl*100:.1f}%" if trades_with_sl > 0 else "   Stop Out Rate: 0.0%")
+time.sleep(0.1)
+print(f"   Market Exposure: {exposure_with_sl:.1f}%")
+time.sleep(0.1)
+
+print(f"\n📈 PERFORMANCE COMPARISON:")
+time.sleep(0.1)
+improvement = ((capital_with_sl - capital_no_sl) / capital_no_sl) * 100
+if improvement > 0:
+    print(f"   ✅ Stop loss improved returns by: +{improvement:.2f}%")
     time.sleep(0.1)
 else:
-    print(f"   ❌ Strategy was not profitable")
+    print(f"   ❌ Stop loss reduced returns by: {improvement:.2f}%")
     time.sleep(0.1)
 
-print(f"   Trading Frequency: {trades} trades in {len(y_pred_proba)} days")
+dd_improvement = (dd_no_sl*100) - (dd_with_sl*100)
+if dd_improvement > 0:
+    print(f"   ✅ Stop loss reduced drawdown by: -{dd_improvement:.2f}%")
+    time.sleep(0.1)
+else:
+    print(f"   ❌ Stop loss increased drawdown by: +{abs(dd_improvement):.2f}%")
+    time.sleep(0.1)
+
+print(f"\n💡 RISK MANAGEMENT INSIGHTS:")
 time.sleep(0.1)
-print(f"   Days in Market: {trades} ({exposure:.1f}% of time)")
+print(f"   Stop loss activated {stopped_count} times")
 time.sleep(0.1)
-print(f"   Days Out of Market: {len(y_pred_proba) - trades} ({100-exposure:.1f}% of time)")
+print(f"   Average trades between stops: {trades_with_sl/max(stopped_count, 1):.1f}" if stopped_count > 0 else "   No stops triggered")
 time.sleep(0.1)
 
 print("="*60)
