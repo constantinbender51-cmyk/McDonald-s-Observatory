@@ -142,8 +142,12 @@ accuracy = accuracy_score(y_test, y_pred)
 print(f"\nModel Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
 time.sleep(0.1)
 
-# Step 7: Simulate trading strategies with confidence threshold
-print("\nSimulating trading strategies...")
+# Step 7: Brute Force Optimization for No-Trade Zone Threshold
+print("\nStarting brute force optimization...")
+time.sleep(0.1)
+print("Testing thresholds from 0.1% to 10.0% in 0.1% increments")
+time.sleep(0.1)
+print("="*60)
 time.sleep(0.1)
 
 def calculate_drawdown(capital_history):
@@ -157,78 +161,105 @@ def calculate_drawdown(capital_history):
             max_dd = dd
     return max_dd
 
-# Basic Strategy (100% long/short binary - no threshold)
-capital_basic = 10000
-capital_history_basic = [capital_basic]
-trades_basic = 0
+def simulate_threshold_strategy(threshold_percent, y_pred_proba, test_prices):
+    """Simulate trading with given threshold percentage"""
+    threshold = threshold_percent / 100.0
+    upper_threshold = 0.5 + threshold
+    lower_threshold = 0.5 - threshold
+    
+    capital = 10000
+    capital_history = [capital]
+    trades = 0
+    
+    for i in range(len(y_pred_proba)):
+        current_price = test_prices.iloc[i]
+        prediction_prob = y_pred_proba[i]
+        
+        # Determine position based on threshold
+        if prediction_prob >= upper_threshold:
+            position = 1  # Long
+            trades += 1
+        elif prediction_prob <= lower_threshold:
+            position = -1  # Short
+            trades += 1
+        else:
+            position = 0  # Flat
+        
+        # Calculate daily return
+        if i < len(y_pred_proba) - 1:
+            next_price = test_prices.iloc[i + 1]
+            daily_return = (next_price - current_price) / current_price
+            
+            # Update capital based on position
+            if position == 1:  # Long
+                capital *= (1 + daily_return)
+            elif position == -1:  # Short
+                capital *= (1 - daily_return)
+            # Flat position: capital remains unchanged
+        
+        capital_history.append(capital)
+    
+    max_drawdown = calculate_drawdown(capital_history)
+    total_return = (capital - 10000) / 10000 * 100
+    market_exposure = trades / len(y_pred_proba) * 100
+    
+    return capital, max_drawdown, total_return, trades, market_exposure
 
-# Confidence Threshold Strategy (10% threshold)
-capital_threshold = 10000
-capital_history_threshold = [capital_threshold]
-trades_threshold = 0
-
+# Get test prices
 test_dates = X_test.index
 test_prices = btc_data.loc[test_dates, 'close']
 
-for i in range(len(X_test)):
-    current_price = test_prices.iloc[i]
-    prediction_prob = y_pred_proba[i]
-    
-    # BASIC STRATEGY: Binary 100% long/short (no threshold)
-    if prediction_prob > 0.5:
-        position_basic = 1  # 100% long
-        trades_basic += 1
-    else:
-        position_basic = -1  # 100% short
-        trades_basic += 1
-    
-    # CONFIDENCE THRESHOLD STRATEGY: Only trade with 10% confidence
-    if prediction_prob >= 0.60:
-        position_threshold = 1  # 100% long
-        trades_threshold += 1
-    elif prediction_prob <= 0.40:
-        position_threshold = -1  # 100% short
-        trades_threshold += 1
-    else:
-        position_threshold = 0  # Flat position (no trade)
-    
-    # Calculate daily return based on positions
-    if i < len(X_test) - 1:
-        next_price = test_prices.iloc[i + 1]
-        daily_return = (next_price - current_price) / current_price
-        
-        # Update basic strategy capital
-        if position_basic == 1:  # Long
-            capital_basic *= (1 + daily_return)
-        elif position_basic == -1:  # Short
-            capital_basic *= (1 - daily_return)
-        
-        # Update threshold strategy capital
-        if position_threshold == 1:  # Long
-            capital_threshold *= (1 + daily_return)
-        elif position_threshold == -1:  # Short
-            capital_threshold *= (1 - daily_return)
-        # If position_threshold == 0, capital remains unchanged (flat)
-    
-    # Update capital histories
-    capital_history_basic.append(capital_basic)
-    capital_history_threshold.append(capital_threshold)
+# Test basic strategy (0% threshold) for comparison
+print("\nTesting Basic Strategy (0% threshold)...")
+time.sleep(0.1)
+capital_basic, dd_basic, return_basic, trades_basic, exposure_basic = simulate_threshold_strategy(0, y_pred_proba, test_prices)
+print(f"Basic Strategy - Capital: ${capital_basic:,.2f}, Return: {return_basic:+.2f}%")
+time.sleep(0.1)
 
-# Calculate drawdowns and returns
-max_drawdown_basic = calculate_drawdown(capital_history_basic)
-max_drawdown_threshold = calculate_drawdown(capital_history_threshold)
+# Brute force optimization
+results = []
+best_capital = 0
+best_threshold = 0
 
-total_return_basic = (capital_basic - 10000) / 10000 * 100
-total_return_threshold = (capital_threshold - 10000) / 10000 * 100
+print("\nTesting threshold strategies...")
+time.sleep(0.1)
 
-# Calculate trade statistics
-total_days = len(X_test)
-days_in_market_threshold = trades_threshold
-days_out_of_market = total_days - trades_threshold
+# Test thresholds from 0.1% to 10.0% in 0.1% increments
+thresholds_to_test = [x * 0.1 for x in range(1, 101)]  # 0.1, 0.2, ..., 10.0
+
+for threshold_percent in thresholds_to_test:
+    capital, max_dd, total_return, trades, exposure = simulate_threshold_strategy(
+        threshold_percent, y_pred_proba, test_prices
+    )
+    
+    results.append({
+        'threshold_percent': threshold_percent,
+        'capital': capital,
+        'return_percent': total_return,
+        'max_drawdown': max_dd * 100,
+        'trades': trades,
+        'market_exposure': exposure
+    })
+    
+    # Update best result
+    if capital > best_capital:
+        best_capital = capital
+        best_threshold = threshold_percent
+    
+    # Print progress every 10 thresholds
+    if threshold_percent % 1.0 == 0:
+        print(f"  Tested {threshold_percent:4.1f}% - Capital: ${capital:,.2f}, Trades: {trades}, Exposure: {exposure:.1f}%")
+        time.sleep(0.1)
+
+# Convert results to DataFrame for analysis
+results_df = pd.DataFrame(results)
+
+# Find optimal threshold
+optimal_result = results_df.loc[results_df['capital'].idxmax()]
 
 print("\n" + "="*60)
 time.sleep(0.1)
-print("TRADING STRATEGY COMPARISON: CONFIDENCE THRESHOLD")
+print("BRUTE FORCE OPTIMIZATION RESULTS")
 time.sleep(0.1)
 print("="*60)
 time.sleep(0.1)
@@ -238,76 +269,82 @@ time.sleep(0.1)
 print(f"   Accuracy: {accuracy*100:.2f}%")
 time.sleep(0.1)
 
-print(f"\n⚡ BASIC STRATEGY (Always Invested):")
+print(f"\n⚡ BASIC STRATEGY (0% Threshold):")
 time.sleep(0.1)
 print(f"   Final Capital: ${capital_basic:,.2f}")
 time.sleep(0.1)
-print(f"   Total Return: {total_return_basic:+.2f}%")
+print(f"   Total Return: {return_basic:+.2f}%")
 time.sleep(0.1)
-print(f"   Maximum Drawdown: {max_drawdown_basic*100:.2f}%")
+print(f"   Maximum Drawdown: {dd_basic*100:.2f}%")
 time.sleep(0.1)
 print(f"   Total Trades: {trades_basic}")
 time.sleep(0.1)
-print(f"   Days in Market: {total_days} (100%)")
+print(f"   Market Exposure: {exposure_basic:.1f}%")
 time.sleep(0.1)
 
-print(f"\n🎯 CONFIDENCE THRESHOLD STRATEGY (10% Threshold):")
+print(f"\n🏆 OPTIMAL STRATEGY FOUND:")
 time.sleep(0.1)
-print(f"   Final Capital: ${capital_threshold:,.2f}")
+print(f"   Optimal Threshold: {optimal_result['threshold_percent']:.1f}%")
 time.sleep(0.1)
-print(f"   Total Return: {total_return_threshold:+.2f}%")
+print(f"   Final Capital: ${optimal_result['capital']:,.2f}")
 time.sleep(0.1)
-print(f"   Maximum Drawdown: {max_drawdown_threshold*100:.2f}%")
+print(f"   Total Return: {optimal_result['return_percent']:+.2f}%")
 time.sleep(0.1)
-print(f"   Total Trades: {trades_threshold}")
+print(f"   Maximum Drawdown: {optimal_result['max_drawdown']:.2f}%")
 time.sleep(0.1)
-print(f"   Days in Market: {days_in_market_threshold} ({days_in_market_threshold/total_days*100:.1f}%)")
+print(f"   Total Trades: {optimal_result['trades']}")
 time.sleep(0.1)
-print(f"   Days Out of Market: {days_out_of_market} ({days_out_of_market/total_days*100:.1f}%)")
+print(f"   Market Exposure: {optimal_result['market_exposure']:.1f}%")
 time.sleep(0.1)
 
-print(f"\n📈 COMPARISON:")
+print(f"\n📈 IMPROVEMENT OVER BASIC STRATEGY:")
 time.sleep(0.1)
-if capital_threshold > capital_basic:
-    improvement = ((capital_threshold - capital_basic) / capital_basic) * 100
-    print(f"   ✅ Threshold strategy outperformed by: +{improvement:.2f}%")
+improvement = ((optimal_result['capital'] - capital_basic) / capital_basic) * 100
+print(f"   Capital Improvement: +{improvement:.2f}%")
+time.sleep(0.1)
+return_improvement = optimal_result['return_percent'] - return_basic
+print(f"   Return Improvement: +{return_improvement:.2f}%")
+time.sleep(0.1)
+
+print(f"\n🔍 TOP 5 PERFORMING THRESHOLDS:")
+time.sleep(0.1)
+top_5 = results_df.nlargest(5, 'capital')[['threshold_percent', 'capital', 'return_percent', 'max_drawdown', 'market_exposure']]
+for i, (_, row) in enumerate(top_5.iterrows(), 1):
+    print(f"   {i}. {row['threshold_percent']:4.1f}% - ${row['capital']:,.2f} "
+          f"({row['return_percent']:+.2f}%), DD: {row['max_drawdown']:.2f}%, "
+          f"Exposure: {row['market_exposure']:.1f}%")
     time.sleep(0.1)
-else:
-    improvement = ((capital_basic - capital_threshold) / capital_threshold) * 100
-    print(f"   ❌ Basic strategy outperformed by: +{improvement:.2f}%")
-    time.sleep(0.1)
 
-print(f"\n💡 STRATEGY INSIGHTS:")
+print(f"\n💡 STRATEGY PARAMETERS FOR OPTIMAL THRESHOLD:")
 time.sleep(0.1)
-print(f"   Basic: Always 100% invested, higher trading frequency")
+upper_bound = 0.5 + (optimal_result['threshold_percent'] / 100)
+lower_bound = 0.5 - (optimal_result['threshold_percent'] / 100)
+print(f"   Go Long if prediction ≥ {upper_bound:.3f}")
 time.sleep(0.1)
-print(f"   Threshold: Selective trading, potentially better risk-adjusted returns")
+print(f"   Go Short if prediction ≤ {lower_bound:.3f}")
 time.sleep(0.1)
-print(f"   Threshold Rules: Long ≥0.60, Short ≤0.40, Flat between 0.40-0.60")
+print(f"   Stay Flat if prediction between {lower_bound:.3f} and {upper_bound:.3f}")
 time.sleep(0.1)
+
 print("="*60)
 time.sleep(0.1)
 
-# Additional analysis: Show prediction distribution
-high_conviction_long = len([p for p in y_pred_proba if p >= 0.60])
-high_conviction_short = len([p for p in y_pred_proba if p <= 0.40])
-neutral_zone = len([p for p in y_pred_proba if 0.40 < p < 0.60])
-
-print(f"\n🔍 PREDICTION CONFIDENCE DISTRIBUTION:")
+# Additional analysis: Show threshold vs performance relationship
+print(f"\n📊 THRESHOLD PERFORMANCE ANALYSIS:")
 time.sleep(0.1)
-print(f"   High Conviction Long (≥0.60): {high_conviction_long} trades ({high_conviction_long/len(y_pred_proba)*100:.1f}%)")
+min_exposure = results_df['market_exposure'].min()
+max_exposure = results_df['market_exposure'].max()
+avg_exposure = results_df['market_exposure'].mean()
+print(f"   Market Exposure Range: {min_exposure:.1f}% to {max_exposure:.1f}%")
 time.sleep(0.1)
-print(f"   High Conviction Short (≤0.40): {high_conviction_short} trades ({high_conviction_short/len(y_pred_proba)*100:.1f}%)")
-time.sleep(0.1)
-print(f"   No Trade Zone (0.40-0.60): {neutral_zone} trades ({neutral_zone/len(y_pred_proba)*100:.1f}%)")
+print(f"   Average Market Exposure: {avg_exposure:.1f}%")
 time.sleep(0.1)
 
-# Calculate win rate for threshold strategy
-if trades_threshold > 0:
-    print(f"\n📊 THRESHOLD STRATEGY EFFICIENCY:")
+# Find most conservative strategy with good returns
+good_returns = results_df[results_df['return_percent'] > return_basic]
+if len(good_returns) > 0:
+    conservative_optimal = good_returns.loc[good_returns['market_exposure'].idxmin()]
+    print(f"   Most Conservative Good Strategy: {conservative_optimal['threshold_percent']:.1f}% threshold")
     time.sleep(0.1)
-    print(f"   Trade Frequency: {trades_threshold}/{total_days} days ({trades_threshold/total_days*100:.1f}%)")
-    time.sleep(0.1)
-    market_exposure = days_in_market_threshold / total_days * 100
-    print(f"   Market Exposure: {market_exposure:.1f}%")
+    print(f"     Capital: ${conservative_optimal['capital']:,.2f}, Exposure: {conservative_optimal['market_exposure']:.1f}%")
     time.sleep(0.1)
