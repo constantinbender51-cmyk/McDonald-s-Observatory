@@ -1,242 +1,187 @@
 import pandas as pd
 import numpy as np
-from binance.client import Client
+import requests
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import warnings
 warnings.filterwarnings('ignore')
 
-# =============================================================================
-# CONFIGURABLE HYPERPARAMETERS
-# =============================================================================
-
-# Ranges for brute force optimization
-LOOKBACK_DAYS_RANGE = range(5, 31)  # 5 to 30 inclusive
-TARGET_DAYS_AHEAD_RANGE = range(5, 31)  # 5 to 30 inclusive
-
-# =============================================================================
-
+# Step 1: Fetch Bitcoin OHLCV data from Binance
+print("Fetching Bitcoin data from Binance...")
 def fetch_bitcoin_data():
-    """Fetch daily Bitcoin price data from Binance starting Jan 1, 2018"""
-    client = Client()
+    url = "https://api.binance.com/api/v3/klines"
+    params = {
+        'symbol': 'BTCUSDT',
+        'interval': '1d',
+        'startTime': int(pd.Timestamp('2018-01-01').timestamp() * 1000),
+        'limit': 1000
+    }
     
-    # Get daily BTCUSDT data from January 1, 2018
-    klines = client.get_historical_klines(
-        "BTCUSDT",
-        Client.KLINE_INTERVAL_1DAY,
-        "1 January, 2018"
-    )
-    
-    # Create DataFrame
-    columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 
-               'close_time', 'quote_asset_volume', 'number_of_trades',
-               'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore']
-    
-    df = pd.DataFrame(klines, columns=columns)
+    all_data = []
+    while True:
+        response = requests.get(url, params=params)
+        data = response.json()
+        if not data:
+            break
+        all_data.extend(data)
+        # Set next startTime
+        params['startTime'] = data[-1][0] + 1
+        
+    df = pd.DataFrame(all_data, columns=[
+        'timestamp', 'open', 'high', 'low', 'close', 'volume',
+        'close_time', 'quote_asset_volume', 'number_of_trades',
+        'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+    ])
     
     # Convert to proper data types
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df['close'] = df['close'].astype(float)
-    df['volume'] = df['volume'].astype(float)
-    df['high'] = df['high'].astype(float)
-    df['low'] = df['low'].astype(float)
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        df[col] = pd.to_numeric(df[col])
     
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
     
     return df[['open', 'high', 'low', 'close', 'volume']]
 
-def calculate_macd(df, fast=12, slow=26, signal=9):
-    """Calculate MACD line and signal line"""
-    exp1 = df['close'].ewm(span=fast, adjust=False).mean()
-    exp2 = df['close'].ewm(span=slow, adjust=False).mean()
-    macd = exp1 - exp2
-    signal_line = macd.ewm(span=signal, adjust=False).mean()
-    
-    return macd, signal_line
+# Fetch data
+btc_data = fetch_bitcoin_data()
+print(f"Fetched {len(btc_data)} days of data")
 
-def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k=3, d=3):
-    """Calculate Stochastic RSI"""
-    # Calculate RSI
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=rsi_period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=rsi_period).mean()
-    rs = gain / loss
+# Step 2: Calculate technical indicators
+print("Calculating technical indicators...")
+
+# Price change percentages (24 days)
+for i in range(1, 25):
+    btc_data[f'price_change_{i}'] = btc_data['close'].pct_change(periods=i)
+
+# Volume change percentages (24 days)
+for i in range(1, 25):
+    btc_data[f'volume_change_{i}'] = btc_data['volume'].pct_change(periods=i)
+
+# MACD (12, 26, 9)
+exp12 = btc_data['close'].ewm(span=12, adjust=False).mean()
+exp26 = btc_data['close'].ewm(span=26, adjust=False).mean()
+macd_line = exp12 - exp26
+signal_line = macd_line.ewm(span=9, adjust=False).mean()
+macd_histogram = macd_line - signal_line
+
+# Add MACD histogram for 24 days
+for i in range(24):
+    btc_data[f'macd_hist_{i+1}'] = macd_histogram.shift(i)
+
+# Stochastic RSI
+def calculate_stoch_rsi(close, period=14):
+    # RSI calculation
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    
+    avg_gain = gain.rolling(window=period).mean()
+    avg_loss = loss.rolling(window=period).mean()
+    
+    rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     
-    # Calculate Stochastic RSI
-    rsi_min = rsi.rolling(window=stoch_period).min()
-    rsi_max = rsi.rolling(window=stoch_period).max()
-    stoch_rsi = (rsi - rsi_min) / (rsi_max - rsi_min)
-    
+    # Stochastic RSI
+    stoch_rsi = (rsi - rsi.rolling(period).min()) / (rsi.rolling(period).max() - rsi.rolling(period).min())
     return stoch_rsi
 
-def create_features_and_target(df, lookback_days, target_days_ahead):
-    """Create features and target variable"""
-    # Calculate price change percentages
-    df['price_pct_change'] = df['close'].pct_change()
-    
-    # Calculate volume change percentages
-    df['volume_pct_change'] = df['volume'].pct_change()
-    
-    # Calculate MACD and signal line difference
-    macd, signal_line = calculate_macd(df)
-    df['macd_signal_diff'] = macd - signal_line
-    
-    # Calculate Stochastic RSI
-    df['stoch_rsi'] = calculate_stochastic_rsi(df)
-    
-    # Create target: price change direction after target_days_ahead days
-    df['future_price'] = df['close'].shift(-target_days_ahead)
-    df['price_change_direction'] = (df['future_price'] > df['close']).astype(int)
-    
-    # Create feature columns for last lookback_days of each indicator
-    feature_columns = []
-    
-    # lookback_days of price change percentages
-    for i in range(1, lookback_days + 1):
-        df[f'price_pct_change_lag_{i}'] = df['price_pct_change'].shift(i)
-        feature_columns.append(f'price_pct_change_lag_{i}')
-    
-    # lookback_days of volume change percentages
-    for i in range(1, lookback_days + 1):
-        df[f'volume_pct_change_lag_{i}'] = df['volume_pct_change'].shift(i)
-        feature_columns.append(f'volume_pct_change_lag_{i}')
-    
-    # lookback_days of MACD - Signal differences
-    for i in range(1, lookback_days + 1):
-        df[f'macd_signal_diff_lag_{i}'] = df['macd_signal_diff'].shift(i)
-        feature_columns.append(f'macd_signal_diff_lag_{i}')
-    
-    # lookback_days of Stochastic RSI values
-    for i in range(1, lookback_days + 1):
-        df[f'stoch_rsi_lag_{i}'] = df['stoch_rsi'].shift(i)
-        feature_columns.append(f'stoch_rsi_lag_{i}')
-    
-    # Drop rows with NaN values (from lag features and indicator calculations)
-    df_clean = df.dropna(subset=feature_columns + ['price_change_direction'])
-    
-    return df_clean, feature_columns
+stoch_rsi = calculate_stoch_rsi(btc_data['close'])
 
-def evaluate_hyperparameters(lookback_days, target_days_ahead, df):
-    """Evaluate model performance for given hyperparameters"""
-    try:
-        # Create features and target
-        df_clean, feature_columns = create_features_and_target(df.copy(), lookback_days, target_days_ahead)
-        
-        # Check if we have enough data
-        if len(df_clean) < 100:
-            return None, None, None
-        
-        # Prepare data for training
-        X = df_clean[feature_columns]
-        y = df_clean['price_change_direction']
-        
-        # Split data (chronological split)
-        split_index = int(len(X) * 0.8)
-        X_train = X.iloc[:split_index]
-        X_test = X.iloc[split_index:]
-        y_train = y.iloc[:split_index]
-        y_test = y.iloc[split_index:]
-        
-        # Check if we have enough test samples
-        if len(X_test) < 50:
-            return None, None, None
-        
-        # Train logistic regression model
-        model = LogisticRegression(random_state=42, max_iter=1000)
-        model.fit(X_train, y_train)
-        
-        # Make predictions and calculate accuracy
-        y_pred = model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-        
-        # Calculate baseline accuracy
-        baseline_accuracy = max(y_test.mean(), 1 - y_test.mean())
-        improvement = accuracy - baseline_accuracy
-        
-        return accuracy, baseline_accuracy, improvement
-        
-    except Exception as e:
-        print(f"Error with lookback={lookback_days}, target={target_days_ahead}: {e}")
-        return None, None, None
+# Add Stochastic RSI for 24 days
+for i in range(24):
+    btc_data[f'stoch_rsi_{i+1}'] = stoch_rsi.shift(i)
 
-def main():
-    print("Fetching Bitcoin data from Binance...")
-    df = fetch_bitcoin_data()
-    print(f"Fetched {len(df)} days of data")
-    
-    print("\nStarting brute force hyperparameter optimization...")
-    print(f"Lookback days range: {LOOKBACK_DAYS_RANGE}")
-    print(f"Target days ahead range: {TARGET_DAYS_AHEAD_RANGE}")
-    print(f"Total combinations to test: {len(LOOKBACK_DAYS_RANGE) * len(TARGET_DAYS_AHEAD_RANGE)}")
-    
-    results = []
-    best_accuracy = 0
-    best_params = None
-    
-    # Test all combinations
-    for lookback_days in LOOKBACK_DAYS_RANGE:
-        for target_days_ahead in TARGET_DAYS_AHEAD_RANGE:
-            print(f"Testing: lookback={lookback_days}, target={target_days_ahead}")
-            
-            accuracy, baseline, improvement = evaluate_hyperparameters(lookback_days, target_days_ahead, df)
-            
-            if accuracy is not None:
-                results.append({
-                    'lookback_days': lookback_days,
-                    'target_days_ahead': target_days_ahead,
-                    'accuracy': accuracy,
-                    'baseline_accuracy': baseline,
-                    'improvement': improvement,
-                    'total_features': lookback_days * 4  # 4 feature types
-                })
-                
-                # Update best parameters
-                if accuracy > best_accuracy:
-                    best_accuracy = accuracy
-                    best_params = (lookback_days, target_days_ahead)
-                
-                print(f"  Accuracy: {accuracy:.4f}, Improvement: {improvement:.4f}")
-            else:
-                print(f"  Skipped - insufficient data")
-    
-    # Create results DataFrame
-    results_df = pd.DataFrame(results)
-    
-    if len(results_df) == 0:
-        print("No valid results found. Please check the data.")
-        return
-    
-    # Sort by accuracy (descending)
-    results_df = results_df.sort_values('accuracy', ascending=False)
-    
-    print("\n" + "="*80)
-    print("BRUTE FORCE OPTIMIZATION RESULTS")
-    print("="*80)
-    
-    # Display top 10 results
-    print("\nTop 10 Parameter Combinations:")
-    print(results_df.head(10).round(4).to_string(index=False))
-    
-    # Best result
-    best_result = results_df.iloc[0]
-    print(f"\nBEST COMBINATION:")
-    print(f"Lookback Days: {best_result['lookback_days']}")
-    print(f"Target Days Ahead: {best_result['target_days_ahead']}")
-    print(f"Accuracy: {best_result['accuracy']:.4f} ({best_result['accuracy']*100:.2f}%)")
-    print(f"Baseline Accuracy: {best_result['baseline_accuracy']:.4f} ({best_result['baseline_accuracy']*100:.2f}%)")
-    print(f"Improvement: {best_result['improvement']:.4f} ({best_result['improvement']*100:.2f}%)")
-    print(f"Total Features: {best_result['total_features']}")
-    
-    # Summary statistics
-    print(f"\nSUMMARY STATISTICS:")
-    print(f"Total combinations tested: {len(LOOKBACK_DAYS_RANGE) * len(TARGET_DAYS_AHEAD_RANGE)}")
-    print(f"Valid results: {len(results_df)}")
-    print(f"Average accuracy: {results_df['accuracy'].mean():.4f}")
-    print(f"Maximum accuracy: {results_df['accuracy'].max():.4f}")
-    print(f"Minimum accuracy: {results_df['accuracy'].min():.4f}")
-    
-    return results_df
+# Step 3: Create target variable (price direction after 14 days)
+btc_data['future_price'] = btc_data['close'].shift(-14)
+btc_data['price_change_14d'] = (btc_data['future_price'] - btc_data['close']) / btc_data['close']
+btc_data['target'] = (btc_data['price_change_14d'] > 0).astype(int)
 
-if __name__ == "__main__":
-    results_df = main()
+# Step 4: Prepare features and target
+feature_columns = (
+    [f'price_change_{i}' for i in range(1, 25)] +
+    [f'volume_change_{i}' for i in range(1, 25)] +
+    [f'macd_hist_{i}' for i in range(1, 25)] +
+    [f'stoch_rsi_{i}' for i in range(1, 25)]
+)
+
+# Create feature matrix and target vector
+X = btc_data[feature_columns].copy()
+y = btc_data['target'].copy()
+
+# Remove rows with NaN values
+valid_indices = ~(X.isna().any(axis=1) | y.isna())
+X = X[valid_indices]
+y = y[valid_indices]
+
+print(f"Total samples after cleaning: {len(X)}")
+
+# Step 5: Split data and train model
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False, random_state=42)
+
+print(f"Training samples: {len(X_train)}")
+print(f"Testing samples: {len(X_test)}")
+
+model = LogisticRegression(random_state=42, max_iter=1000)
+model.fit(X_train, y_train)
+
+# Step 6: Make predictions
+y_pred = model.predict(X_test)
+y_pred_proba = model.predict_proba(X_test)[:, 1]
+
+# Calculate accuracy
+accuracy = accuracy_score(y_test, y_pred)
+print(f"\nModel Accuracy: {accuracy:.4f} ({accuracy*100:.2f}%)")
+
+# Step 7: Simulate trading strategy
+print("\nSimulating trading strategy...")
+
+capital = 10000
+position = 0  # 1 for long, -1 for short
+capital_history = [capital]
+peak_capital = capital
+max_drawdown = 0
+
+test_dates = X_test.index
+test_prices = btc_data.loc[test_dates, 'close']
+
+for i in range(len(X_test)):
+    current_price = test_prices.iloc[i]
+    prediction = y_pred_proba[i]
+    
+    # Determine position based on prediction
+    if prediction > 0.5:
+        # Long position
+        if position != 1:
+            position = 1
+    else:
+        # Short position  
+        if position != -1:
+            position = -1
+    
+    # Calculate daily return based on position
+    if i < len(X_test) - 1:
+        next_price = test_prices.iloc[i + 1]
+        daily_return = (next_price - current_price) / current_price
+        
+        if position == 1:  # Long
+            capital *= (1 + daily_return)
+        elif position == -1:  # Short
+            capital *= (1 - daily_return)
+    
+    # Update capital history and drawdown
+    capital_history.append(capital)
+    if capital > peak_capital:
+        peak_capital = capital
+    current_drawdown = (peak_capital - capital) / peak_capital
+    if current_drawdown > max_drawdown:
+        max_drawdown = current_drawdown
+
+final_capital = capital
+
+print("\n=== RESULTS ===")
+print(f"Start Capital: $10,000")
+print(f"Final Capital: ${final_capital:,.2f}")
+print(f"Total Return: {((final_capital-10000)/10000)*100:.2f}%")
+print(f"Maximum Drawdown: {max_drawdown*100:.2f}%")
+print(f"Model Accuracy: {accuracy*100:.2f}%")
