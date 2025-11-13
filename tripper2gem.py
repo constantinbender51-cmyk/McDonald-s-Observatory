@@ -21,7 +21,6 @@ def fetch_binance_data(symbol='BTC/USDT', timeframe='1d', start_date='2018-01-01
             last_timestamp = ohlcv[-1][0]
             since = last_timestamp + 1
             if last_timestamp >= exchange.milliseconds() - 24 * 60 * 60 * 1000: break
-            # print(f"Fetched {len(all_ohlcv)} candles so far...") # Commented out to reduce clutter
         except Exception as e:
             print(f"Error fetching data: {e}")
             break
@@ -99,26 +98,25 @@ def train_and_evaluate_with_threshold(df, feature_cols):
     print(f"STANDARD MODEL (Threshold 0.5)")
     print(f"{'='*50}")
     print(f"Accuracy: {acc_std:.4f} ({acc_std*100:.2f}%)")
-    print(f"Total Trades Taken: {len(y_test)}")
     
-    # --- CUSTOM THRESHOLD EVALUATION (0.4 / 0.6) ---
+    # --- CUSTOM THRESHOLD EVALUATION (0.45 / 0.55) ---
     # Get raw probabilities for Class 1 (Price Increase)
     probs = model.predict_proba(X_test_scaled)[:, 1]
     
-    # Define High Confidence Mask
-    # Logic: Trade if prob > 0.6 OR prob < 0.4
-    high_conf_mask = (probs > 0.6) | (probs < 0.4)
+    # Define High Confidence Mask (5% threshold)
+    # Logic: Trade if prob > 0.55 OR prob < 0.45
+    high_conf_mask = (probs > 0.55) | (probs < 0.45)
     
-    # Filter the test set to only include high confidence rows
+    # Filter the test set
     y_test_filtered = y_test[high_conf_mask]
     probs_filtered = probs[high_conf_mask]
     
     # Convert probabilities to predictions based on the threshold
-    # If prob > 0.6, prediction is 1. If prob < 0.4, prediction is 0.
-    y_pred_filtered = (probs_filtered > 0.6).astype(int)
+    # If prob > 0.55, prediction is 1. If prob < 0.45, prediction is 0.
+    y_pred_filtered = (probs_filtered > 0.55).astype(int)
     
     print(f"\n{'='*50}")
-    print(f"HIGH CONFIDENCE MODEL (Thresholds < 0.4 and > 0.6)")
+    print(f"MODERATE CONFIDENCE MODEL (Thresholds < 0.45 and > 0.55)")
     print(f"{'='*50}")
     
     if len(y_test_filtered) > 0:
@@ -129,7 +127,7 @@ def train_and_evaluate_with_threshold(df, feature_cols):
         print(f"Trades Taken: {len(y_test_filtered)} out of {len(y_test)}")
         print(f"Coverage (Trades / Total Days): {coverage:.2f}%")
         
-        print("\nBreakdown of High Confidence Trades:")
+        print("\nBreakdown of Trades:")
         print(classification_report(y_test_filtered, y_pred_filtered))
     else:
         print("No predictions met the confidence threshold criteria.")
