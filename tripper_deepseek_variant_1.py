@@ -2,10 +2,18 @@ import pandas as pd
 import numpy as np
 from binance.client import Client
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import warnings
 warnings.filterwarnings('ignore')
+
+# =============================================================================
+# CONFIGURABLE HYPERPARAMETERS
+# =============================================================================
+
+LOOKBACK_DAYS = 10
+TARGET_DAYS_AHEAD = 7
+
+# =============================================================================
 
 def fetch_bitcoin_data():
     """Fetch daily Bitcoin price data from Binance starting Jan 1, 2018"""
@@ -63,43 +71,43 @@ def calculate_stochastic_rsi(df, rsi_period=14, stoch_period=14, k=3, d=3):
 
 def create_features_and_target(df):
     """Create features and target variable"""
-    # Calculate price change percentages (10 days)
+    # Calculate price change percentages
     df['price_pct_change'] = df['close'].pct_change()
     
-    # Calculate volume change percentages (10 days)
+    # Calculate volume change percentages
     df['volume_pct_change'] = df['volume'].pct_change()
     
-    # Calculate MACD and signal line difference (10 days)
+    # Calculate MACD and signal line difference
     macd, signal_line = calculate_macd(df)
     df['macd_signal_diff'] = macd - signal_line
     
-    # Calculate Stochastic RSI (10 days)
+    # Calculate Stochastic RSI
     df['stoch_rsi'] = calculate_stochastic_rsi(df)
     
-    # Create target: price change direction after 7 days
-    df['future_price'] = df['close'].shift(-7)
+    # Create target: price change direction after TARGET_DAYS_AHEAD days
+    df['future_price'] = df['close'].shift(-TARGET_DAYS_AHEAD)
     df['price_change_direction'] = (df['future_price'] > df['close']).astype(int)
     
-    # Create feature columns for last 10 days of each indicator
+    # Create feature columns for last LOOKBACK_DAYS of each indicator
     feature_columns = []
     
-    # 10 days of price change percentages
-    for i in range(1, 11):
+    # LOOKBACK_DAYS of price change percentages
+    for i in range(1, LOOKBACK_DAYS + 1):
         df[f'price_pct_change_lag_{i}'] = df['price_pct_change'].shift(i)
         feature_columns.append(f'price_pct_change_lag_{i}')
     
-    # 10 days of volume change percentages
-    for i in range(1, 11):
+    # LOOKBACK_DAYS of volume change percentages
+    for i in range(1, LOOKBACK_DAYS + 1):
         df[f'volume_pct_change_lag_{i}'] = df['volume_pct_change'].shift(i)
         feature_columns.append(f'volume_pct_change_lag_{i}')
     
-    # 10 days of MACD - Signal differences
-    for i in range(1, 11):
+    # LOOKBACK_DAYS of MACD - Signal differences
+    for i in range(1, LOOKBACK_DAYS + 1):
         df[f'macd_signal_diff_lag_{i}'] = df['macd_signal_diff'].shift(i)
         feature_columns.append(f'macd_signal_diff_lag_{i}')
     
-    # 10 days of Stochastic RSI values
-    for i in range(1, 11):
+    # LOOKBACK_DAYS of Stochastic RSI values
+    for i in range(1, LOOKBACK_DAYS + 1):
         df[f'stoch_rsi_lag_{i}'] = df['stoch_rsi'].shift(i)
         feature_columns.append(f'stoch_rsi_lag_{i}')
     
@@ -114,6 +122,9 @@ def main():
     print(f"Fetched {len(df)} days of data")
     
     print("\nCreating features and target variable...")
+    print(f"Lookback days: {LOOKBACK_DAYS}")
+    print(f"Target days ahead: {TARGET_DAYS_AHEAD}")
+    
     df_clean, feature_columns = create_features_and_target(df)
     print(f"After cleaning: {len(df_clean)} samples with {len(feature_columns)} features")
     
