@@ -8,6 +8,7 @@ from sklearn.metrics import accuracy_score, classification_report
 import time
 
 def fetch_binance_data(symbol='BTC/USDT', timeframe='1d', start_date='2018-01-01T00:00:00Z'):
+    """Fetches historical OHLCV data from Binance, handling pagination."""
     print(f"Fetching {timeframe} data for {symbol} starting from {start_date}...")
     exchange = ccxt.binance({'rateLimit': 1200, 'enableRateLimit': True})
     since = exchange.parse8601(start_date)
@@ -31,6 +32,7 @@ def fetch_binance_data(symbol='BTC/USDT', timeframe='1d', start_date='2018-01-01
     return df
 
 def calculate_indicators(df):
+    """Calculates requested technical indicators and price/volume changes."""
     df['pct_change'] = df['close'].pct_change()
     df['vol_change'] = df['volume'].pct_change()
     
@@ -40,7 +42,7 @@ def calculate_indicators(df):
     df['macd'] = exp1 - exp2
     df['signal_line'] = df['macd'].ewm(span=9, adjust=False).mean()
     
-    # NEW FEATURE: MACD Histogram (Difference between MACD and Signal Line)
+    # MACD Histogram (Difference between MACD and Signal Line)
     df['macd_histogram'] = df['macd'] - df['signal_line']
     
     # Stochastic RSI
@@ -56,6 +58,7 @@ def calculate_indicators(df):
     return df
 
 def create_features_and_target(df, window=28, prediction_horizon=7):
+    """Creates lagged features and two separate binary targets (UP and DOWN)."""
     features = []
     for i in range(1, window + 1):
         col_name_p = f'pct_change_lag_{i}'
@@ -65,82 +68,77 @@ def create_features_and_target(df, window=28, prediction_horizon=7):
         df[col_name_v] = df['vol_change'].shift(i)
         features.append(col_name_v)
     
-    # UPDATED: Using macd_histogram instead of macd and signal_line separately
     features.extend(['macd_histogram', 'stoch_rsi'])
     
-    # Target: 1 if future close > current close, else 0
     future_close = df['close'].shift(-prediction_horizon)
-    df['target'] = (future_close > df['close']).astype(int)
+    
+    # Target 1: Price Increase (1 if future close > current close, 0 otherwise)
+    df['target_up'] = (future_close > df['close']).astype(int)
+    
+    # Target 2: Price Decrease (1 if future close < current close, 0 otherwise)
+    df['target_down'] = (future_close < df['close']).astype(int)
+    
     df_clean = df.dropna()
     return df_clean, features
 
-def train_and_evaluate_with_threshold(df, feature_cols):
-    X = df[feature_cols]
-    y = df['target']
+def train_and_evaluate_two_models(df, feature_cols):
+    """Trains and evaluates two Logistic Regression models (UP and DOWN)."""
     
-    # Split (Shuffle=False)
+    X = df[feature_cols]
+    
+    # Split
     split_point = int(len(df) * 0.80)
     X_train = X.iloc[:split_point]
     X_test = X.iloc[split_point:]
-    y_train = y.iloc[:split_point]
-    y_test = y.iloc[split_point:]
     
-    # Scale
+    # Scale features
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
+
+    # =========================================================================
+    # 1. MODEL UP (Predicting Price Increase)
+    # =========================================================================
+    y_up = df['target_up']
+    y_up_train = y_up.iloc[:split_point]
+    y_up_test = y_up.iloc[split_point:]
     
-    # Train
-    model = LogisticRegression(random_state=42, max_iter=1000)
-    model.fit(X_train_scaled, y_train)
+    model_up = LogisticRegression(random_state=42, max_iter=1000)
+    model_up.fit(X_train_scaled, y_up_train)
+    y_pred_up = model_up.predict(X_test_scaled)
+    acc_up = accuracy_score(y_up_test, y_pred_up)
     
-    # --- STANDARD EVALUATION (Threshold 0.5) ---
-    y_pred_std = model.predict(X_test_scaled)
-    acc_std = accuracy_score(y_test, y_pred_std)
+    print(f"\n{'='*60}")
+    print("MODEL 1: PREDICTING PRICE INCREASE (Target: future price > current price)")
+    print(f"{'='*60}")
+    print(f"Overall Test Accuracy: {acc_up:.4f} ({acc_up*100:.2f}%)")
+    print("\nClassification Report (0: Not Up, 1: Up):")
+    print(classification_report(y_up_test, y_pred_up, zero_division=0))
+
+    # =========================================================================
+    # 2. MODEL DOWN (Predicting Price Decrease)
+    # =========================================================================
+    y_down = df['target_down']
+    y_down_train = y_down.iloc[:split_point]
+    y_down_test = y_down.iloc[split_point:]
     
-    print(f"\n{'='*50}")
-    print(f"STANDARD MODEL (Threshold 0.5)")
-    print(f"{'='*50}")
-    print(f"Accuracy: {acc_std:.4f} ({acc_std*100:.2f}%)")
+    model_down = LogisticRegression(random_state=42, max_iter=1000)
+    model_down.fit(X_train_scaled, y_down_train)
+    y_pred_down = model_down.predict(X_test_scaled)
+    acc_down = accuracy_score(y_down_test, y_pred_down)
     
-    # --- CUSTOM THRESHOLD EVALUATION (0.45 / 0.55) ---
-    # Get raw probabilities for Class 1 (Price Increase)
-    probs = model.predict_proba(X_test_scaled)[:, 1]
-    
-    # Define High Confidence Mask (5% threshold)
-    # Logic: Trade if prob > 0.55 OR prob < 0.45
-    high_conf_mask = (probs > 0.55) | (probs < 0.45)
-    
-    # Filter the test set
-    y_test_filtered = y_test[high_conf_mask]
-    probs_filtered = probs[high_conf_mask]
-    
-    # Convert probabilities to predictions based on the threshold
-    # If prob > 0.55, prediction is 1. If prob < 0.45, prediction is 0.
-    y_pred_filtered = (probs_filtered > 0.55).astype(int)
-    
-    print(f"\n{'='*50}")
-    print(f"MODERATE CONFIDENCE MODEL (Thresholds < 0.45 and > 0.55)")
-    print(f"{'='*50}")
-    
-    if len(y_test_filtered) > 0:
-        acc_conf = accuracy_score(y_test_filtered, y_pred_filtered)
-        coverage = len(y_test_filtered) / len(y_test) * 100
-        
-        print(f"Accuracy: {acc_conf:.4f} ({acc_conf*100:.2f}%)")
-        print(f"Trades Taken: {len(y_test_filtered)} out of {len(y_test)}")
-        print(f"Coverage (Trades / Total Days): {coverage:.2f}%")
-        
-        print("\nBreakdown of Trades:")
-        print(classification_report(y_test_filtered, y_pred_filtered))
-    else:
-        print("No predictions met the confidence threshold criteria.")
+    print(f"\n{'='*60}")
+    print("MODEL 2: PREDICTING PRICE DECREASE (Target: future price < current price)")
+    print(f"{'='*60}")
+    print(f"Overall Test Accuracy: {acc_down:.4f} ({acc_down*100:.2f}%)")
+    print("\nClassification Report (0: Not Down, 1: Down):")
+    print(classification_report(y_down_test, y_pred_down, zero_division=0))
 
 if __name__ == "__main__":
     df = fetch_binance_data(symbol='BTC/USDT', start_date='2018-01-01T00:00:00Z')
     if not df.empty:
         df = calculate_indicators(df)
         df_model, feature_columns = create_features_and_target(df, window=28, prediction_horizon=7)
-        train_and_evaluate_with_threshold(df_model, feature_columns)
+        train_and_evaluate_two_models(df_model, feature_columns)
     else:
         print("No data fetched.")
