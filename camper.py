@@ -54,42 +54,92 @@ def fetch_binance_data():
     print(f"Total candles fetched: {len(df)}")
     return df
 
-# Calculate MACD
+# Safe percentage change calculation with epsilon
+def safe_pct_change(series, epsilon=1e-10):
+    """Calculate percentage change safely, handling zero and near-zero values"""
+    return ((series - series.shift(1)) / (series.shift(1).abs() + epsilon)) * 100
+
+# Calculate MACD with clipping
 def calculate_macd(prices, fast=12, slow=26, signal=9):
     ema_fast = prices.ewm(span=fast, adjust=False).mean()
     ema_slow = prices.ewm(span=slow, adjust=False).mean()
     macd_line = ema_fast - ema_slow
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    return macd_line - signal_line
+    macd_histogram = macd_line - signal_line
+    
+    # Clip extreme MACD values to prevent overflow
+    return np.clip(macd_histogram, -10, 10)
 
-# Calculate RSI
+# Calculate RSI with safe calculations
 def calculate_rsi(prices, period=14):
     delta = prices.diff()
+    
+    # Use epsilon to avoid division by zero
+    epsilon = 1e-10
+    
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
+    
+    rs = gain / (loss + epsilon)
     rsi = 100 - (100 / (1 + rs))
+    
+    # Clip RSI to valid range and handle NaN/Inf
+    rsi = np.clip(rsi, 0, 100).fillna(50)
     return rsi
 
-# Calculate Stochastic RSI
+# Calculate Stochastic RSI with safe calculations
 def calculate_stoch_rsi(prices, period=14):
     rsi = calculate_rsi(prices, period)
-    stoch_rsi = (rsi - rsi.rolling(window=period).min()) / \
-                (rsi.rolling(window=period).max() - rsi.rolling(window=period).min())
-    return stoch_rsi.fillna(0.5)
+    
+    # Handle cases where min == max (all values same)
+    rsi_min = rsi.rolling(window=period).min()
+    rsi_max = rsi.rolling(window=period).max()
+    
+    # Avoid division by zero
+    denominator = rsi_max - rsi_min
+    stoch_rsi = (rsi - rsi_min) / (denominator + 1e-10)
+    
+    # Clip to [0, 1] range and fill NaN with 0.5 (neutral)
+    stoch_rsi = np.clip(stoch_rsi, 0, 1).fillna(0.5)
+    return stoch_rsi
 
-# Prepare features
+# Data validation and cleaning
+def validate_and_clean_features(features):
+    """Remove infinite values and replace with finite bounds"""
+    features = np.array(features, dtype=np.float64)
+    
+    # Replace inf with large finite values
+    features[np.isinf(features) & (features > 0)] = 1e10  # positive inf
+    features[np.isinf(features) & (features < 0)] = -1e10  # negative inf
+    
+    # Replace very large values with reasonable bounds
+    features = np.clip(features, -1e8, 1e8)
+    
+    # Check for any remaining non-finite values
+    if np.any(~np.isfinite(features)):
+        # Replace any remaining NaN or inf with column means
+        col_means = np.nanmean(features, axis=0)
+        inds = np.where(~np.isfinite(features))
+        features[inds] = np.take(col_means, inds[1])
+    
+    return features
+
+# Prepare features with safe calculations
 def prepare_features(df):
     print("Calculating technical indicators...")
     
-    # Calculate indicators
-    df['price_change'] = df['close'].pct_change() * 100
-    df['volume_change'] = df['volume'].pct_change() * 100
+    # Calculate indicators with safe methods
+    df['price_change'] = safe_pct_change(df['close'])
+    df['volume_change'] = safe_pct_change(df['volume'])
     df['macd_diff'] = calculate_macd(df['close'])
     df['stoch_rsi'] = calculate_stoch_rsi(df['close'])
     
-    # Fill NaN values
-    df = df.fillna(0)
+    # Clip extreme percentage changes
+    df['price_change'] = np.clip(df['price_change'], -50, 50)  # Max ±50% price change
+    df['volume_change'] = np.clip(df['volume_change'], -500, 500)  # Max ±500% volume change
+    
+    # Fill remaining NaN values with forward fill, then 0
+    df = df.fillna(method='ffill').fillna(0)
     
     features = []
     targets = []
@@ -113,9 +163,15 @@ def prepare_features(df):
     
     print(f"Created {len(features)} samples with 96 features each")
     
-    return np.array(features), np.array(targets), df
+    # Validate and clean features
+    features_clean = validate_and_clean_features(features)
+    
+    print(f"Features validation: min={np.min(features_clean):.6f}, max={np.max(features_clean):.6f}")
+    print(f"Features validation: any NaN={np.any(np.isnan(features_clean))}, any Inf={np.any(np.isinf(features_clean))}")
+    
+    return features_clean, np.array(targets), df
 
-# Neural Network Implementation
+# Neural Network Implementation (unchanged but with added safety)
 class NeuralNetwork:
     def __init__(self):
         self.layers = [96, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 1]
@@ -283,6 +339,10 @@ def main():
     print("Normalizing features...")
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
+    
+    # Final validation before training
+    print(f"Final validation - X_scaled: min={np.min(X_scaled):.6f}, max={np.max(X_scaled):.6f}")
+    print(f"Final validation - any NaN: {np.any(np.isnan(X_scaled))}, any Inf: {np.any(np.isinf(X_scaled))}")
     
     # Train/test split (80/20)
     split_idx = int(len(X_scaled) * 0.8)
