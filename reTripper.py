@@ -145,36 +145,31 @@ def prepare_data(df):
     
     return data
 
-def train_models(data):
-    """Train logistic regression models"""
+def train_model(data):
+    """Train logistic regression model"""
     feature_cols = [col for col in data.columns if col.startswith(('close_pct', 'volume_pct', 'macd', 'stoch'))]
     
     X = data[feature_cols]
-    y_6d = data[f'direction_{PREDICTION_HORIZONS[0]}d']
-    y_10d = data[f'direction_{PREDICTION_HORIZONS[1]}d']
+    y = data[f'direction_{PREDICTION_HORIZON}d']
     
     # Split into train and test
     split_idx = int(len(X) * TRAIN_TEST_SPLIT)
     
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_6d_train, y_6d_test = y_6d.iloc[:split_idx], y_6d.iloc[split_idx:]
-    y_10d_train, y_10d_test = y_10d.iloc[:split_idx], y_10d.iloc[split_idx:]
+    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
     
     # Scale features
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
     
-    # Train models
-    model_6d = LogisticRegression(max_iter=LR_MAX_ITER, random_state=LR_RANDOM_STATE)
-    model_10d = LogisticRegression(max_iter=LR_MAX_ITER, random_state=LR_RANDOM_STATE)
+    # Train model
+    model = LogisticRegression(max_iter=LR_MAX_ITER, random_state=LR_RANDOM_STATE)
+    model.fit(X_train_scaled, y_train)
     
-    model_6d.fit(X_train_scaled, y_6d_train)
-    model_10d.fit(X_train_scaled, y_10d_train)
-    
-    return model_6d, model_10d, scaler, X_test, y_6d_test, y_10d_test, data.iloc[split_idx:], split_idx
+    return model, scaler, X_test, y_test, data.iloc[split_idx:], split_idx
 
-def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, initial_capital=INITIAL_CAPITAL):
+def backtest_strategy(df, data, model, scaler, test_start_idx, initial_capital=INITIAL_CAPITAL):
     """Backtest the trading strategy with detailed monitoring"""
     feature_cols = [col for col in data.columns if col.startswith(('close_pct', 'volume_pct', 'macd', 'stoch'))]
     
@@ -184,18 +179,38 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
     X_test = test_data[feature_cols]
     X_test_scaled = scaler.transform(X_test)
     
-    # Get predictions
-    pred_6d = model_6d.predict(X_test_scaled)
-    pred_10d = model_10d.predict(X_test_scaled)
+    # Get prediction probabilities (probability of price increase)
+    pred_proba = model.predict_proba(X_test_scaled)[:, 1]  # Probability of class 1 (up)
     
-    # Get predicted returns for stop loss calculation
-    returns_6d = test_data[f'return_{PREDICTION_HORIZONS[0]}d'].values
+    # Get actual 10-day directions for accuracy calculation
+    actual_10d_direction = test_data['direction_10d'].values
+    
+    # Calculate accuracy metrics
+    # Metric 1: Using threshold (>0.66 = up, <0.33 = down, else neutral)
+    pred_direction_threshold = np.where(pred_proba > LONG_THRESHOLD, 1, 
+                                       np.where(pred_proba < SHORT_THRESHOLD, 0, -1))
+    # Only count non-neutral predictions
+    valid_predictions_threshold = pred_direction_threshold != -1
+    if valid_predictions_threshold.sum() > 0:
+        accuracy_threshold = (pred_direction_threshold[valid_predictions_threshold] == 
+                            actual_10d_direction[valid_predictions_threshold]).sum() / valid_predictions_threshold.sum()
+    else:
+        accuracy_threshold = 0
+    
+    # Metric 2: Using 0.5 threshold (>0.5 = up, <0.5 = down)
+    pred_direction_50 = (pred_proba > 0.5).astype(int)
+    # Filter out NaN values in actual direction
+    valid_predictions_50 = ~np.isnan(actual_10d_direction)
+    if valid_predictions_50.sum() > 0:
+        accuracy_50 = (pred_direction_50[valid_predictions_50] == 
+                      actual_10d_direction[valid_predictions_50]).sum() / valid_predictions_50.sum()
+    else:
+        accuracy_50 = 0
     
     capital = initial_capital
     position = 0  # 0: no position, 1: long, -1: short
     entry_price = 0
     entry_date = None
-    stop_loss = 0
     
     trades = []
     capital_history = []
@@ -206,50 +221,7 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
     for i in range(len(test_data)):
         current_date = test_data.index[i]
         current_price = test_prices.iloc[i]
-        current_high = df.loc[current_date, 'high']
-        current_low = df.loc[current_date, 'low']
-        
-        # Check stop loss if in position (using high/low, not close)
-        stop_loss_triggered = False
-        if position != 0:
-            if position == 1:  # Long position
-                if current_low <= stop_loss:
-                    # Close position at stop loss price
-                    exit_price = stop_loss
-                    pnl_pct = (exit_price - entry_price) / entry_price
-                    capital = capital * (1 + pnl_pct)
-                    trades.append({
-                        'type': 'exit',
-                        'position_type': 'long',
-                        'date': current_date.strftime('%Y-%m-%d'),
-                        'price': exit_price,
-                        'reason': 'stop_loss',
-                        'pnl_pct': pnl_pct * 100,
-                        'capital': capital,
-                        'entry_date': entry_date,
-                        'entry_price': entry_price
-                    })
-                    position = 0
-                    stop_loss_triggered = True
-            elif position == -1:  # Short position
-                if current_high >= stop_loss:
-                    # Close position at stop loss price
-                    exit_price = stop_loss
-                    pnl_pct = (entry_price - exit_price) / entry_price
-                    capital = capital * (1 + pnl_pct)
-                    trades.append({
-                        'type': 'exit',
-                        'position_type': 'short',
-                        'date': current_date.strftime('%Y-%m-%d'),
-                        'price': exit_price,
-                        'reason': 'stop_loss',
-                        'pnl_pct': pnl_pct * 100,
-                        'capital': capital,
-                        'entry_date': entry_date,
-                        'entry_price': entry_price
-                    })
-                    position = 0
-                    stop_loss_triggered = True
+        current_proba = pred_proba[i]
         
         # Track capital and benchmark at each step
         current_capital = capital
@@ -261,7 +233,8 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
         capital_history.append({
             'date': current_date.strftime('%Y-%m-%d'),
             'capital': current_capital,
-            'position': position
+            'position': position,
+            'probability': float(current_proba)
         })
         
         benchmark_value = initial_capital * (current_price / initial_benchmark_price)
@@ -270,16 +243,16 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
             'value': benchmark_value
         })
         
-        # Generate signals
-        signal = 0  # 0 = hold (close positions), 1 = long, -1 = short
-        if pred_6d[i] == 1 and pred_10d[i] == 1:
-            signal = 1  # Both predict up
-        elif pred_6d[i] == 0 and pred_10d[i] == 0:
-            signal = -1  # Both predict down
-        # else: signal = 0 (hold - models disagree)
+        # Determine signal based on probability thresholds
+        if current_proba > LONG_THRESHOLD:
+            signal = 1  # Long
+        elif current_proba < SHORT_THRESHOLD:
+            signal = -1  # Short
+        else:
+            signal = 0  # Flatten
         
-        # If hold signal and we have a position, close it
-        if signal == 0 and position != 0 and not stop_loss_triggered:
+        # If flatten signal and we have a position, close it
+        if signal == 0 and position != 0:
             if position == 1:
                 pnl_pct = (current_price - entry_price) / entry_price
             else:
@@ -290,16 +263,17 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
                 'position_type': 'long' if position == 1 else 'short',
                 'date': current_date.strftime('%Y-%m-%d'),
                 'price': current_price,
-                'reason': 'hold_signal',
+                'reason': 'flatten_signal',
                 'pnl_pct': pnl_pct * 100,
                 'capital': capital,
                 'entry_date': entry_date,
-                'entry_price': entry_price
+                'entry_price': entry_price,
+                'probability': float(current_proba)
             })
             position = 0
         
-        # Execute trades based on signals (only if signal is not hold and position changed)
-        if signal != 0 and signal != position and not stop_loss_triggered:
+        # Execute trades based on signals (only if signal is not flatten and position changed)
+        elif signal != 0 and signal != position:
             # Close existing position if any
             if position != 0:
                 if position == 1:
@@ -316,7 +290,8 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
                     'pnl_pct': pnl_pct * 100,
                     'capital': capital,
                     'entry_date': entry_date,
-                    'entry_price': entry_price
+                    'entry_price': entry_price,
+                    'probability': float(current_proba)
                 })
             
             # Open new position
@@ -324,29 +299,12 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
             entry_price = current_price
             entry_date = current_date.strftime('%Y-%m-%d')
             
-            # Set stop loss based on 6-day prediction magnitude
-            predicted_return_6d = returns_6d[i]
-            if not np.isnan(predicted_return_6d):
-                stop_loss_pct = -STOP_LOSS_MULTIPLIER * abs(predicted_return_6d)
-                if position == 1:
-                    stop_loss = entry_price * (1 + stop_loss_pct)
-                else:
-                    stop_loss = entry_price * (1 - stop_loss_pct)
-            else:
-                # Default 5% stop loss if prediction not available
-                if position == 1:
-                    stop_loss = entry_price * 0.95
-                else:
-                    stop_loss = entry_price * 1.05
-            
             trades.append({
                 'type': 'entry',
                 'position_type': 'long' if position == 1 else 'short',
                 'date': entry_date,
                 'price': entry_price,
-                'signal_6d': int(pred_6d[i]),
-                'signal_10d': int(pred_10d[i]),
-                'stop_loss': stop_loss,
+                'probability': float(current_proba),
                 'capital': capital
             })
     
@@ -368,12 +326,13 @@ def backtest_strategy(df, data, model_6d, model_10d, scaler, test_start_idx, ini
             'pnl_pct': pnl_pct * 100,
             'capital': capital,
             'entry_date': entry_date,
-            'entry_price': entry_price
+            'entry_price': entry_price,
+            'probability': float(pred_proba[-1])
         })
     
-    return capital, trades, capital_history, benchmark_history
+    return capital, trades, capital_history, benchmark_history, accuracy_threshold, accuracy_50
 
-def save_results(final_capital, benchmark_capital, trades, capital_history, benchmark_history):
+def save_results(final_capital, benchmark_capital, trades, capital_history, benchmark_history, accuracy_threshold, accuracy_50):
     """Save results to JSON file"""
     results = {
         'summary': {
@@ -382,7 +341,9 @@ def save_results(final_capital, benchmark_capital, trades, capital_history, benc
             'strategy_return': ((final_capital / INITIAL_CAPITAL) - 1) * 100,
             'benchmark_return': ((benchmark_capital / INITIAL_CAPITAL) - 1) * 100,
             'total_trades': len([t for t in trades if t['type'] == 'entry']),
-            'initial_capital': INITIAL_CAPITAL
+            'initial_capital': INITIAL_CAPITAL,
+            'accuracy_threshold': accuracy_threshold * 100,
+            'accuracy_50': accuracy_50 * 100
         },
         'trades': trades,
         'capital_history': capital_history,
@@ -390,8 +351,9 @@ def save_results(final_capital, benchmark_capital, trades, capital_history, benc
         'hyperparameters': {
             'start_date': START_DATE,
             'lookback_days': LOOKBACK_DAYS,
-            'prediction_horizons': PREDICTION_HORIZONS,
-            'stop_loss_multiplier': STOP_LOSS_MULTIPLIER,
+            'prediction_horizon': PREDICTION_HORIZON,
+            'long_threshold': LONG_THRESHOLD,
+            'short_threshold': SHORT_THRESHOLD,
             'train_test_split': TRAIN_TEST_SPLIT
         }
     }
@@ -535,6 +497,14 @@ HTML_TEMPLATE = """
                 <h3>Initial Capital</h3>
                 <div class="value">${{ results.summary.initial_capital }}</div>
             </div>
+            <div class="summary-item">
+                <h3>Accuracy (Threshold)</h3>
+                <div class="value">{{ "%.2f"|format(results.summary.accuracy_threshold) }}%</div>
+            </div>
+            <div class="summary-item">
+                <h3>Accuracy (50%)</h3>
+                <div class="value">{{ "%.2f"|format(results.summary.accuracy_50) }}%</div>
+            </div>
         </div>
     </div>
     
@@ -552,6 +522,7 @@ HTML_TEMPLATE = """
                     <th>Position</th>
                     <th>Date</th>
                     <th>Price</th>
+                    <th>Probability</th>
                     <th>Reason</th>
                     <th>P&L %</th>
                     <th>Capital</th>
@@ -564,6 +535,7 @@ HTML_TEMPLATE = """
                     <td>{{ trade.position_type.upper() }}</td>
                     <td>{{ trade.date }}</td>
                     <td>${{ "%.2f"|format(trade.price) }}</td>
+                    <td>{{ "%.3f"|format(trade.probability) }}</td>
                     <td>{{ trade.reason if trade.type == 'exit' else '-' }}</td>
                     <td class="{{ 'positive' if trade.get('pnl_pct', 0) > 0 else 'negative' if trade.get('pnl_pct', 0) < 0 else '' }}">
                         {{ "%.2f"|format(trade.pnl_pct) if trade.get('pnl_pct') is not none else '-' }}%
@@ -707,12 +679,12 @@ def run_backtest():
     print("Preparing features and targets...")
     data = prepare_data(df)
     
-    print("Training models...")
-    model_6d, model_10d, scaler, X_test, y_6d_test, y_10d_test, test_data, split_idx = train_models(data)
+    print("Training model...")
+    model, scaler, X_test, y_test, test_data, split_idx = train_model(data)
     
     print("Running backtest...")
-    final_capital, trades, capital_history, benchmark_history = backtest_strategy(
-        df, data, model_6d, model_10d, scaler, split_idx
+    final_capital, trades, capital_history, benchmark_history, accuracy_threshold, accuracy_50 = backtest_strategy(
+        df, data, model, scaler, split_idx
     )
     
     # Calculate benchmark
@@ -729,10 +701,12 @@ def run_backtest():
     print(f"Strategy Return:          {((final_capital / INITIAL_CAPITAL) - 1) * 100:.2f}%")
     print(f"Benchmark Return:         {((benchmark_capital / INITIAL_CAPITAL) - 1) * 100:.2f}%")
     print(f"Number of Trades:         {len([t for t in trades if t['type'] == 'entry'])}")
+    print(f"Accuracy (Threshold):     {accuracy_threshold * 100:.2f}%")
+    print(f"Accuracy (50%):           {accuracy_50 * 100:.2f}%")
     print("="*50)
     
     # Save results
-    backtest_results = save_results(final_capital, benchmark_capital, trades, capital_history, benchmark_history)
+    backtest_results = save_results(final_capital, benchmark_capital, trades, capital_history, benchmark_history, accuracy_threshold, accuracy_50)
     
     print(f"\nResults saved to backtest_results.json")
     print(f"Starting web server on port {PORT}...")
