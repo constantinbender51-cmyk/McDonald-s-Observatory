@@ -15,8 +15,9 @@ warnings.filterwarnings('ignore')
 # ============================================================================
 START_DATE = '2018-01-01'  # Data start date
 LOOKBACK_DAYS = 10  # Number of days for input features
-PREDICTION_HORIZONS = [6, 10]  # Days ahead to predict
-STOP_LOSS_MULTIPLIER = 1  # Stop loss as fraction of predicted return (80%)
+PREDICTION_HORIZON = 27  # Days ahead to predict
+LONG_THRESHOLD = 0.66  # Probability threshold for long position
+SHORT_THRESHOLD = 0.33  # Probability threshold for short position
 TRAIN_TEST_SPLIT = 0.8  # Train/test split ratio
 INITIAL_CAPITAL = 1000  # Starting capital in USD
 
@@ -122,13 +123,16 @@ def create_features(df, lookback=LOOKBACK_DAYS):
     
     return features
 
-def create_targets(df, horizons=PREDICTION_HORIZONS):
+def create_targets(df, horizon=PREDICTION_HORIZON):
     """Create target variables (future returns)"""
     targets = pd.DataFrame(index=df.index)
     
-    for h in horizons:
-        targets[f'return_{h}d'] = df['close'].pct_change(h).shift(-h)
-        targets[f'direction_{h}d'] = (targets[f'return_{h}d'] > 0).astype(int)
+    targets[f'return_{horizon}d'] = df['close'].pct_change(horizon).shift(-horizon)
+    targets[f'direction_{horizon}d'] = (targets[f'return_{horizon}d'] > 0).astype(int)
+    
+    # Also calculate 10-day returns for accuracy measurement
+    targets['return_10d'] = df['close'].pct_change(10).shift(-10)
+    targets['direction_10d'] = (targets['return_10d'] > 0).astype(int)
     
     return targets
 
