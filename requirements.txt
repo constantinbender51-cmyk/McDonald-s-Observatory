@@ -9,3 +9,4 @@ flask
 matplotlib
 gunicorn
 ccxt
+python-binance
