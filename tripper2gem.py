@@ -34,11 +34,14 @@ def calculate_indicators(df):
     df['pct_change'] = df['close'].pct_change()
     df['vol_change'] = df['volume'].pct_change()
     
-    # MACD
+    # MACD and Signal Line
     exp1 = df['close'].ewm(span=12, adjust=False).mean()
     exp2 = df['close'].ewm(span=26, adjust=False).mean()
     df['macd'] = exp1 - exp2
     df['signal_line'] = df['macd'].ewm(span=9, adjust=False).mean()
+    
+    # NEW FEATURE: MACD Histogram (Difference between MACD and Signal Line)
+    df['macd_histogram'] = df['macd'] - df['signal_line']
     
     # Stochastic RSI
     delta = df['close'].diff()
@@ -62,7 +65,8 @@ def create_features_and_target(df, window=28, prediction_horizon=7):
         df[col_name_v] = df['vol_change'].shift(i)
         features.append(col_name_v)
     
-    features.extend(['macd', 'signal_line', 'stoch_rsi'])
+    # UPDATED: Using macd_histogram instead of macd and signal_line separately
+    features.extend(['macd_histogram', 'stoch_rsi'])
     
     # Target: 1 if future close > current close, else 0
     future_close = df['close'].shift(-prediction_horizon)
