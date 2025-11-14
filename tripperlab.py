@@ -10,7 +10,7 @@ from datetime import datetime
 # ==========================================
 # CONFIGURATION
 # ==========================================
-X_DAYS = 7            # Number of past days to use as features
+X_DAYS = 15            # Number of past days to use as features
 ZETA_DAYS = 7         # Target horizon: Predict price direction ZETA days from now
 START_DATE = "01 Jan, 2018"
 SYMBOL = "BTCUSDT"
