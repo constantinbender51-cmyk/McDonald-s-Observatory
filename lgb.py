@@ -29,6 +29,13 @@ else:
 delayed_print("\nLoading data...")
 df = pd.read_csv('1m.csv')
 delayed_print(f"Data shape: {df.shape}")
+
+# TRIM DATA FIRST - Keep only last 2 million rows to manage memory
+if len(df) > 2000000:
+    delayed_print(f"Trimming data from {len(df)} to last 2,000,000 rows to manage memory...")
+    df = df.tail(2000000).reset_index(drop=True)
+    delayed_print(f"Data shape after trimming: {df.shape}")
+
 delayed_print(f"Columns: {df.columns.tolist()}")
 delayed_print(df.head().to_string())
 
@@ -351,18 +358,18 @@ if position != 0:
 final_capital = capital
 total_return = (final_capital - initial_capital) / initial_capital * 100
 
-print(f"\nFinal Capital: ${final_capital:,.2f}")
-print(f"Total Return: {total_return:.2f}%")
-print(f"Profit/Loss: ${final_capital - initial_capital:,.2f}")
+delayed_print(f"\nFinal Capital: ${final_capital:,.2f}")
+delayed_print(f"Total Return: {total_return:.2f}%")
+delayed_print(f"Profit/Loss: ${final_capital - initial_capital:,.2f}")
 
 # Buy and hold comparison
 buy_hold_return = (test_df['close'].iloc[-1] - test_df['close'].iloc[0]) / test_df['close'].iloc[0] * 100
 buy_hold_capital = initial_capital * (1 + buy_hold_return / 100)
 
-print(f"\nBuy & Hold Return: {buy_hold_return:.2f}%")
-print(f"Buy & Hold Final Capital: ${buy_hold_capital:,.2f}")
-print(f"\nStrategy vs Buy & Hold: {total_return - buy_hold_return:.2f}% {'outperformance' if total_return > buy_hold_return else 'underperformance'}")
+delayed_print(f"\nBuy & Hold Return: {buy_hold_return:.2f}%")
+delayed_print(f"Buy & Hold Final Capital: ${buy_hold_capital:,.2f}")
+delayed_print(f"\nStrategy vs Buy & Hold: {total_return - buy_hold_return:.2f}% {'outperformance' if total_return > buy_hold_return else 'underperformance'}")
 
-print("\n" + "="*80)
-print("BACKTEST COMPLETE")
-print("="*80)
+delayed_print("\n" + "="*80)
+delayed_print("BACKTEST COMPLETE")
+delayed_print("="*80)
