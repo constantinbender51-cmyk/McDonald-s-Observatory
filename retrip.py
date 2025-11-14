@@ -193,7 +193,7 @@ class Backtest:
             
             # Check stop-loss first if we have a position
             if self.current_position:
-                if self._check_stop_loss(current_date, current_high, current_low):
+                if self._check_stop_loss(current_date, current_high, current_low, current_price):
                     continue
             
             # Get predictions using all data up to current day
@@ -230,29 +230,28 @@ class Backtest:
         
         self._print_results()
     
-    def _check_stop_loss(self, date, high, low) -> bool:
+    def _check_stop_loss(self, date, high, low, close_price) -> bool:
         """
-        Check if stop-loss is hit using high/low of candle.
-        Assumes exit at stop price if intraday price touched the stop.
+        Check if stop-loss is hit - ASSUMES EXACT EXECUTION AT STOP PRICE.
         Returns True if position was closed.
         """
         pos = self.current_position
         
         if pos.side == "long":
-            # For long positions, check if low touched or broke below stop
-            if low <= pos.stop_price:
-                # Exit at stop price (or slightly worse if gap down)
-                exit_price = min(pos.stop_price, high)
-                log.info(f"{date.date()}  STOP-LOSS HIT (long) - Low: ${low:,.2f} | Stop: ${pos.stop_price:,.2f}")
+            # For long positions, check if price dropped to or below stop
+            if close_price <= pos.stop_price:
+                # EXACT execution at stop price
+                exit_price = pos.stop_price
+                log.info(f"{date.date()}  STOP-LOSS HIT (long) - Close: ${close_price:,.2f} | Stop: ${pos.stop_price:,.2f}")
                 self._close_position(date, exit_price, "STOP_LOSS")
                 return True
         
         elif pos.side == "short":
-            # For short positions, check if high touched or broke above stop
-            if high >= pos.stop_price:
-                # Exit at stop price (or slightly worse if gap up)
-                exit_price = max(pos.stop_price, low)
-                log.info(f"{date.date()}  STOP-LOSS HIT (short) - High: ${high:,.2f} | Stop: ${pos.stop_price:,.2f}")
+            # For short positions, check if price rose to or above stop
+            if close_price >= pos.stop_price:
+                # EXACT execution at stop price
+                exit_price = pos.stop_price
+                log.info(f"{date.date()}  STOP-LOSS HIT (short) - Close: ${close_price:,.2f} | Stop: ${pos.stop_price:,.2f}")
                 self._close_position(date, exit_price, "STOP_LOSS")
                 return True
         
