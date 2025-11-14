@@ -18,7 +18,8 @@ fetching_status = {
     'error': None,
     'dataframe': None,
     'completion_time': None,
-    'is_test_mode': False
+    'is_test_mode': False,
+    'is_complete': False
 }
 
 def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01', test_mode=False):
@@ -47,13 +48,17 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
     current_ts = start_ts
     batch_size = 1000  # Binance allows up to 1000 records per request
     
-    fetching_status['is_fetching'] = True
-    fetching_status['current_records'] = 0
-    fetching_status['total_records'] = 0
-    fetching_status['error'] = None
-    fetching_status['current_date'] = start_date
-    fetching_status['completion_time'] = None
-    fetching_status['is_test_mode'] = test_mode
+    # Reset status
+    fetching_status.update({
+        'is_fetching': True,
+        'current_records': 0,
+        'total_records': 0,
+        'error': None,
+        'current_date': start_date,
+        'completion_time': None,
+        'is_test_mode': test_mode,
+        'is_complete': False
+    })
     
     print(f"Starting Bitcoin data fetch from Binance... {'(TEST MODE - 1 month)' if test_mode else ''}")
     
@@ -66,11 +71,12 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
                 'limit': batch_size
             }
             
-            response = requests.get(base_url, params=params)
+            response = requests.get(base_url, params=params, timeout=30)
             response.raise_for_status()
             data = response.json()
             
             if not data:
+                print("No more data available from API")
                 break
                 
             all_data.extend(data)
@@ -85,15 +91,17 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
             
             print(f"Fetched {len(all_data)} records up to: {current_date}")
             
-            # Small delay to be respectful to the API
-            time.sleep(0.1)
-            
             # For test mode, break early if we have enough data (approx 1 month)
             if test_mode and len(all_data) >= 43200:  # 30 days * 24 hours * 60 minutes = 43200
                 print("Test mode: Reached approximately 1 month of data, stopping...")
                 break
+            
+            # Small delay to be respectful to the API
+            time.sleep(0.1)
         
         if fetching_status['is_fetching']:  # Only process if not cancelled
+            print(f"Processing {len(all_data)} records into DataFrame...")
+            
             # Convert to DataFrame
             columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 
                        'close_time', 'quote_asset_volume', 'number_of_trades',
@@ -119,14 +127,17 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
             fetching_status['dataframe'] = df
             fetching_status['total_records'] = len(df)
             fetching_status['completion_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            print(f"Data fetch complete. Total records: {len(df)}")
+            fetching_status['is_complete'] = True
+            
+            print(f"✅ Data fetch complete! Total records: {len(df)}")
             
     except Exception as e:
         fetching_status['error'] = str(e)
-        print(f"Error fetching data: {e}")
+        print(f"❌ Error fetching data: {e}")
     
     finally:
         fetching_status['is_fetching'] = False
+        print("Fetching process ended")
 
 def start_fetching_thread(test_mode=False):
     """Start the data fetching in a separate thread"""
@@ -200,6 +211,7 @@ def index():
             .download-btn {
                 background: #007bff;
                 color: white;
+                display: inline-block;
             }
             .download-btn:hover {
                 background: #0056b3;
@@ -239,9 +251,9 @@ def index():
             .success {
                 color: #155724;
                 background: #d4edda;
-                padding: 10px;
+                padding: 20px;
                 border-radius: 5px;
-                margin: 10px 0;
+                margin: 20px 0;
             }
             .last-update {
                 font-size: 12px;
@@ -264,6 +276,14 @@ def index():
                 background: #d1ecf1;
                 color: #0c5460;
                 border: 1px solid #bee5eb;
+            }
+            .blink {
+                animation: blink 1s infinite;
+            }
+            @keyframes blink {
+                0% { opacity: 1; }
+                50% { opacity: 0.5; }
+                100% { opacity: 1; }
             }
         </style>
     </head>
@@ -309,9 +329,12 @@ def index():
                 <h3>✅ Data Fetching Complete! <span id="completionMode" class="mode-indicator"></span></h3>
                 <p id="completionText"></p>
                 <p><strong>Completion Time:</strong> <span id="completionTime"></span></p>
-                <a id="downloadLink" href="/download" class="btn download-btn">
-                    📥 Download CSV File
-                </a>
+                <div style="margin: 20px 0;">
+                    <a id="downloadLink" href="/download" class="btn download-btn blink" style="font-size: 18px; padding: 15px 30px;">
+                        📥 DOWNLOAD CSV FILE NOW
+                    </a>
+                </div>
+                <p><em>Click the button above to download your data</em></p>
             </div>
 
             <div id="preview" style="display: none; margin-top: 30px; text-align: left;">
@@ -324,8 +347,10 @@ def index():
             let progressInterval;
             let visibilityHandler;
             let lastProgressState = {};
+            let completionDetected = false;
             
             function startFetching(testMode) {
+                completionDetected = false;
                 const fetchBtn = document.getElementById('fetchBtn');
                 const testBtn = document.getElementById('testBtn');
                 
@@ -400,6 +425,9 @@ def index():
             }
             
             function showSuccess(records, completionTime, isTestMode) {
+                if (completionDetected) return; // Prevent multiple triggers
+                completionDetected = true;
+                
                 const completionMode = document.getElementById('completionMode');
                 if (isTestMode) {
                     completionMode.textContent = 'TEST DATA';
@@ -426,11 +454,14 @@ def index():
                     });
                     
                 cleanupVisibilityHandler();
+                
+                console.log('✅ Success screen shown with download link');
             }
             
             function showError(message) {
                 document.getElementById('errorContainer').style.display = 'block';
                 document.getElementById('errorContainer').textContent = message;
+                resetButtons();
                 cleanupVisibilityHandler();
             }
             
@@ -471,19 +502,40 @@ def index():
                         const stateChanged = 
                             data.is_fetching !== lastProgressState.is_fetching ||
                             data.current_records !== lastProgressState.current_records ||
-                            data.total_records !== lastProgressState.total_records;
+                            data.total_records !== lastProgressState.total_records ||
+                            data.is_complete !== lastProgressState.is_complete;
                         
                         lastProgressState = data;
                         
-                        if (!data.is_fetching && data.total_records > 0) {
-                            // Fetching completed
+                        // DEBUG: Log state for troubleshooting
+                        console.log('Progress update:', {
+                            is_fetching: data.is_fetching,
+                            current_records: data.current_records,
+                            total_records: data.total_records,
+                            is_complete: data.is_complete,
+                            error: data.error
+                        });
+                        
+                        // COMPLETION DETECTION - Multiple conditions
+                        const isComplete = (
+                            // Condition 1: Explicit completion flag
+                            data.is_complete ||
+                            // Condition 2: Not fetching but have records
+                            (!data.is_fetching && data.total_records > 0) ||
+                            // Condition 3: Not fetching, no error, and have some records
+                            (!data.is_fetching && !data.error && data.current_records > 0)
+                        );
+                        
+                        if (isComplete && data.total_records > 0) {
+                            // Fetching completed successfully
+                            console.log('✅ Completion detected! Stopping interval and showing success');
                             clearInterval(progressInterval);
-                            showSuccess(data.total_records, data.completion_time || 'Unknown', data.is_test_mode);
+                            showSuccess(data.total_records, data.completion_time || new Date().toLocaleString(), data.is_test_mode);
                         } else if (!data.is_fetching && data.error) {
                             // Error occurred
+                            console.log('❌ Error detected:', data.error);
                             clearInterval(progressInterval);
                             showError('Fetching error: ' + data.error);
-                            resetButtons();
                         } else if (data.is_fetching || force || stateChanged) {
                             // Still fetching or force update or state changed
                             const progressFill = document.getElementById('progressFill');
@@ -495,7 +547,7 @@ def index():
                             
                             // Progress indicator - different max for test vs full mode
                             const maxRecords = data.is_test_mode ? 43200 : 3500000;
-                            const progress = Math.min((data.current_records / maxRecords) * 100, 100);
+                            const progress = data.current_records > 0 ? Math.min((data.current_records / maxRecords) * 100, 100) : 0;
                             progressFill.style.width = progress + '%';
                         }
                     })
@@ -510,6 +562,7 @@ def index():
                 fetch('/progress?' + new Date().getTime())
                     .then(response => response.json())
                     .then(data => {
+                        console.log('Initial load state:', data);
                         if (data.is_fetching) {
                             document.getElementById('fetchBtn').disabled = true;
                             document.getElementById('testBtn').disabled = true;
@@ -518,7 +571,7 @@ def index():
                             showProgress(data.is_test_mode);
                             startProgressUpdate();
                             setupVisibilityHandler();
-                        } else if (data.total_records > 0) {
+                        } else if (data.total_records > 0 || data.is_complete) {
                             showSuccess(data.total_records, data.completion_time || 'Unknown', data.is_test_mode);
                         }
                     });
