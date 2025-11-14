@@ -17,7 +17,7 @@ import time
 try:
     import binance_ohlc
 except ImportError:
-    print("ERROR: binance_ohlc module not found. Please ensure it's available.")
+    printd("ERROR: binance_ohlc module not found. Please ensure it's available.")
     sys.exit(1)
 
 # Configuration
@@ -37,6 +37,19 @@ logging.basicConfig(
 )
 log = logging.getLogger("backtest")
 
+def logd(message, level="info"):
+    """Log with 100ms delay."""
+    time.sleep(0.1)
+    if level == "info":
+        log.info(message)
+    elif level == "debug":
+        log.debug(message)
+    elif level == "warning":
+        log.warning(message)
+    elif level == "error":
+        log.error(message)
+    elif level == "critical":
+        log.critical(message)
 
 def stoch_rsi(close: np.ndarray, rsi_period: int = 14, stoch_period: int = 14) -> np.ndarray:
     """Calculate Stochastic RSI indicator."""
@@ -56,6 +69,16 @@ def ema(arr: np.ndarray, n: int) -> np.ndarray:
     """Calculate Exponential Moving Average."""
     return pd.Series(arr).ewm(span=n, adjust=False).mean().values
 
+def printd(*args, **kwargs):
+    """
+    Prints text like the regular print function but adds a 0.1 second delay.
+    
+    Args:
+        *args: Variable number of arguments to print
+        **kwargs: Keyword arguments for print function (sep, end, file, flush)
+    """
+    time.sleep(0.1)
+    print(*args, **kwargs)
 
 class ModelBundle:
     """Linear regression model for price prediction."""
@@ -151,29 +174,29 @@ class Backtest:
         
     def run(self):
         """Execute the backtest."""
-        log.info("=" * 60)
-        log.info("TRAINING MODELS")
-        log.info("=" * 60)
+        logd("=" * 60)
+        logd("TRAINING MODELS")
+        logd("=" * 60)
         
         # Train on first 70% of data
         train_df = self.df.iloc[:self.train_split_idx].copy()
-        log.info(f"Training period: {train_df.index[0]} to {train_df.index[-1]}")
-        log.info(f"Training on {len(train_df)} days of data")
+        logd(f"Training period: {train_df.index[0]} to {train_df.index[-1]}")
+        logd(f"Training on {len(train_df)} days of data")
         
         self.model6.fit(train_df)
         self.model10.fit(train_df)
-        log.info("Models trained successfully")
+        logd("Models trained successfully")
         
-        log.info("=" * 60)
-        log.info("STARTING BACKTEST")
-        log.info("=" * 60)
+        logd("=" * 60)
+        logd("STARTING BACKTEST")
+        logd("=" * 60)
         
         # Test on remaining 30%
         test_df = self.df.iloc[self.train_split_idx:].copy()
-        log.info(f"Test period: {test_df.index[0]} to {test_df.index[-1]}")
-        log.info(f"Testing on {len(test_df)} days")
-        log.info(f"Initial capital: ${self.capital:,.2f}")
-        log.info("")
+        logd(f"Test period: {test_df.index[0]} to {test_df.index[-1]}")
+        logd(f"Testing on {len(test_df)} days")
+        logd(f"Initial capital: ${self.capital:,.2f}")
+        logd("")
         
         # Walk through test period
         for i in range(len(test_df)):
@@ -225,11 +248,11 @@ class Backtest:
         pos = self.current_position
         
         if pos.side == "long" and price <= pos.stop_price:
-            log.info(f"{date.date()}  STOP-LOSS HIT (long) at ${price:,.2f} (stop: ${pos.stop_price:,.2f})")
+            logd(f"{date.date()}  STOP-LOSS HIT (long) at ${price:,.2f} (stop: ${pos.stop_price:,.2f})")
             self._close_position(date, pos.stop_price, "STOP_LOSS")
             return True
         elif pos.side == "short" and price >= pos.stop_price:
-            log.info(f"{date.date()}  STOP-LOSS HIT (short) at ${price:,.2f} (stop: ${pos.stop_price:,.2f})")
+            logd(f"{date.date()}  STOP-LOSS HIT (short) at ${price:,.2f} (stop: ${pos.stop_price:,.2f})")
             self._close_position(date, pos.stop_price, "STOP_LOSS")
             return True
         
@@ -241,7 +264,7 @@ class Backtest:
         
         # Close existing position if moving to HOLD or opposite direction
         if self.current_position:
-            log.info(f"{date.date()}  Signal change: {prev_signal} → {new_signal}")
+            logd(f"{date.date()}  Signal change: {prev_signal} → {new_signal}")
             self._close_position(date, price, "SIGNAL_CHANGE")
         
         # Open new position if not HOLD
@@ -269,8 +292,8 @@ class Backtest:
         
         self.current_position = Trade(date, price, side, size_btc, stop_price)
         
-        log.info(f"{date.date()}  OPEN {side.upper()} {size_btc:.4f} BTC @ ${price:,.2f}")
-        log.info(f"           Notional: ${notional:,.2f} | Stop: ${stop_price:,.2f} | Cost: ${cost:.2f}")
+        logd(f"{date.date()}  OPEN {side.upper()} {size_btc:.4f} BTC @ ${price:,.2f}")
+        logd(f"           Notional: ${notional:,.2f} | Stop: ${stop_price:,.2f} | Cost: ${cost:.2f}")
     
     def _close_position(self, date, price, reason):
         """Close the current position."""
@@ -300,9 +323,9 @@ class Backtest:
         
         self.trades.append(pos)
         
-        log.info(f"{date.date()}  CLOSE {pos.side.upper()} @ ${price:,.2f} | Reason: {reason}")
-        log.info(f"           P&L: ${pnl:,.2f} ({pnl_pct:+.2f}%) | Capital: ${self.capital:,.2f}")
-        log.info("")
+        logd(f"{date.date()}  CLOSE {pos.side.upper()} @ ${price:,.2f} | Reason: {reason}")
+        logd(f"           P&L: ${pnl:,.2f} ({pnl_pct:+.2f}%) | Capital: ${self.capital:,.2f}")
+        logd("")
         
         self.current_position = None
     
@@ -321,9 +344,9 @@ class Backtest:
     
     def _print_results(self):
         """Print backtest results and performance metrics."""
-        log.info("=" * 60)
-        log.info("BACKTEST RESULTS")
-        log.info("=" * 60)
+        logd("=" * 60)
+        logd("BACKTEST RESULTS")
+        logd("=" * 60)
         
         # Convert equity curve to DataFrame
         equity_df = pd.DataFrame(self.equity_curve)
@@ -354,42 +377,42 @@ class Backtest:
         equity_df["returns"] = equity_df["equity"].pct_change()
         sharpe = equity_df["returns"].mean() / equity_df["returns"].std() * np.sqrt(365) if len(equity_df) > 1 else 0
         
-        log.info(f"Initial Capital:        ${INITIAL_CAPITAL:,.2f}")
-        log.info(f"Final Equity:           ${final_equity:,.2f}")
-        log.info(f"Total Return:           {total_return:+.2f}%")
-        log.info(f"Buy & Hold Return:      {bh_return:+.2f}%")
-        log.info(f"Outperformance:         {total_return - bh_return:+.2f}%")
-        log.info("")
-        log.info(f"Total Trades:           {len(self.trades)}")
-        log.info(f"Winning Trades:         {len(winning_trades)}")
-        log.info(f"Losing Trades:          {len(losing_trades)}")
-        log.info(f"Win Rate:               {win_rate:.1f}%")
-        log.info(f"Average Win:            ${avg_win:,.2f}")
-        log.info(f"Average Loss:           ${avg_loss:,.2f}")
-        log.info(f"Profit Factor:          {abs(avg_win/avg_loss):.2f}" if avg_loss != 0 else "N/A")
-        log.info("")
-        log.info(f"Max Drawdown:           {max_drawdown:.2f}%")
-        log.info(f"Sharpe Ratio:           {sharpe:.2f}")
-        log.info("")
+        logd(f"Initial Capital:        ${INITIAL_CAPITAL:,.2f}")
+        logd(f"Final Equity:           ${final_equity:,.2f}")
+        logd(f"Total Return:           {total_return:+.2f}%")
+        logd(f"Buy & Hold Return:      {bh_return:+.2f}%")
+        logd(f"Outperformance:         {total_return - bh_return:+.2f}%")
+        logd("")
+        logd(f"Total Trades:           {len(self.trades)}")
+        logd(f"Winning Trades:         {len(winning_trades)}")
+        logd(f"Losing Trades:          {len(losing_trades)}")
+        logd(f"Win Rate:               {win_rate:.1f}%")
+        logd(f"Average Win:            ${avg_win:,.2f}")
+        logd(f"Average Loss:           ${avg_loss:,.2f}")
+        logd(f"Profit Factor:          {abs(avg_win/avg_loss):.2f}" if avg_loss != 0 else "N/A")
+        logd("")
+        logd(f"Max Drawdown:           {max_drawdown:.2f}%")
+        logd(f"Sharpe Ratio:           {sharpe:.2f}")
+        logd("")
         time.sleep(1)
         
         # Visualize equity curve using logging
-        log.info("=" * 60)
-        log.info("EQUITY CURVE")
-        log.info("=" * 60)
+        logd("=" * 60)
+        logd("EQUITY CURVE")
+        logd("=" * 60)
         self._log_equity_curve(equity_df)
         
         # Trade log
-        log.info("=" * 60)
-        log.info("TRADE LOG")
-        log.info("=" * 60)
+        logd("=" * 60)
+        logd("TRADE LOG")
+        logd("=" * 60)
         for i, trade in enumerate(self.trades, 1):
-            log.info(f"Trade #{i}: {trade.side.upper()}")
-            log.info(f"  Entry:  {trade.entry_date.date()} @ ${trade.entry_price:,.2f}")
-            log.info(f"  Exit:   {trade.exit_date.date()} @ ${trade.exit_price:,.2f}")
-            log.info(f"  Reason: {trade.exit_reason}")
-            log.info(f"  P&L:    ${trade.pnl:+,.2f} ({trade.pnl_pct:+.2f}%)")
-            log.info("")
+            logd(f"Trade #{i}: {trade.side.upper()}")
+            logd(f"  Entry:  {trade.entry_date.date()} @ ${trade.entry_price:,.2f}")
+            logd(f"  Exit:   {trade.exit_date.date()} @ ${trade.exit_price:,.2f}")
+            logd(f"  Reason: {trade.exit_reason}")
+            logd(f"  P&L:    ${trade.pnl:+,.2f} ({trade.pnl_pct:+.2f}%)")
+            logd("")
     
     def _log_equity_curve(self, equity_df):
         """Create ASCII visualization of equity curve in logs."""
@@ -404,7 +427,7 @@ class Backtest:
         chart_height = 20
         
         if max_eq == min_eq:
-            log.info("Equity remained constant")
+            logd("Equity remained constant")
             return
         
         # Create chart
@@ -419,23 +442,22 @@ class Backtest:
             
             # Add axis labels
             if row == chart_height:
-                log.info(f"${max_eq:>10,.0f} |{line}|")
+                logd(f"${max_eq:>10,.0f} |{line}|")
             elif row == 0:
-                log.info(f"${min_eq:>10,.0f} |{line}|")
+                logd(f"${min_eq:>10,.0f} |{line}|")
             elif row == chart_height // 2:
                 mid = (max_eq + min_eq) / 2
-                log.info(f"${mid:>10,.0f} |{line}|")
+                logd(f"${mid:>10,.0f} |{line}|")
             else:
-                log.info(f"{' '*12}|{line}|")
+                logd(f"{' '*12}|{line}|")
         
         # Date axis
         start_date = sampled.iloc[0]["date"].strftime("%Y-%m-%d")
         end_date = sampled.iloc[-1]["date"].strftime("%Y-%m-%d")
-        log.info(f"{' '*12} {start_date}{' '*(len(line)-len(start_date)-len(end_date))}{end_date}")
-
+        logd(f"{' '*12} {start_date}{' '*(len(line)-len(start_date)-len(end_date))}{end_date}")
 
 def main():
-    log.info("Loading data from Binance...")
+    logd("Loading data from Binance...")
     
     # Fetch ALL historical data using the training function
     df = binance_ohlc.get_ohlc_for_training(symbol=SYMBOL, interval=INTERVAL)
@@ -445,10 +467,10 @@ def main():
     df = df[df.index >= START_DATE]
     
     if len(df) == 0:
-        log.error(f"No data available from {START_DATE}")
+        logd(f"No data available from {START_DATE}", "error")
         sys.exit(1)
     
-    log.info(f"Loaded {len(df)} days from {df.index[0].date()} to {df.index[-1].date()}")
+    logd(f"Loaded {len(df)} days from {df.index[0].date()} to {df.index[-1].date()}")
     
     # Calculate split
     train_split_idx = int(len(df) * TRAIN_RATIO)
