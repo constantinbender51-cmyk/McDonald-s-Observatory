@@ -56,9 +56,7 @@ def fetch_binance_data(symbol, timeframe, start_date):
             all_ohlcv.extend(ohlcv)
             since_timestamp = ohlcv[-1][0] + 1 
             
-            if len(all_ohlcv) > 30000:
-                 print(f"Stopping after {len(all_ohlcv)} candles for demonstration purposes.")
-                 break
+            # Removed the artificial 30,000 candle limit to support real application usage.
         
         if not all_ohlcv:
             print(f"API call successful, but no data returned. Falling back to mock data.")
@@ -108,7 +106,6 @@ def preprocess_and_feature_engineer(df, window_size=WINDOW_SIZE, lag=LAG):
         return None, None, None, None
         
     # Calculate Log Return (Target Variable)
-    # This can generate -inf if Close/Close.shift(-lag) is 0 (or near zero)
     df['Log_Return'] = np.log(df['Close'] / df['Close'].shift(-lag)) 
     df.dropna(subset=['Log_Return'], inplace=True)
     
