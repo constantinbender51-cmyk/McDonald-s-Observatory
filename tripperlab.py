@@ -17,11 +17,39 @@ SYMBOL = "BTCUSDT"
 INITIAL_CAPITAL = 10000
 # ==========================================
 
+# --- CUSTOM SCALER CLASS ---
+class CustomMinMaxScaler:
+    """Scales data to a custom range [min_target, max_target]."""
+    def __init__(self, min_target, max_target):
+        self.min_target = min_target
+        self.max_target = max_target
+        self.data_min = None
+        self.data_max = None
+
+    def fit(self, X):
+        """Calculates min/max from the training data (X)."""
+        self.data_min = X.min()
+        self.data_max = X.max()
+        return self
+
+    def transform(self, X):
+        """Applies the transformation using fitted min/max."""
+        # Check for zero range to avoid division by zero
+        if (self.data_max - self.data_min).abs().max() == 0:
+            return X * 0 + (self.min_target + self.max_target) / 2
+        
+        # Min-Max formula: (X - min) / (max - min)
+        X_std = (X - self.data_min) / (self.data_max - self.data_min)
+        
+        # Scale to target range: X_scaled * (target_max - target_min) + target_min
+        X_scaled = X_std * (self.max_target - self.min_target) + self.min_target
+        
+        return X_scaled
+
+# --- DATA & INDICATOR FUNCTIONS ---
+
 def get_binance_data(symbol, start_date):
-    """
-    Fetches daily klines from Binance starting from start_date until now.
-    No API key required for public market data.
-    """
+    """Fetches daily klines from Binance starting from start_date."""
     base_url = "https://api.binance.com/api/v3/klines"
     
     # Convert start_date to milliseconds timestamp
@@ -48,14 +76,12 @@ def get_binance_data(symbol, start_date):
                 
             klines.extend(data)
             
-            # Update start_ts to the timestamp of the last kline + 1 day (86400000 ms)
+            # Update start_ts to the timestamp of the last kline + 1 day
             last_kline_time = data[-1][0]
             start_ts = last_kline_time + 86400000
             
-            # Respect API rate limits
             time.sleep(0.1)
             
-            # Break if we reached current time
             if last_kline_time >= int(time.time() * 1000):
                 break
                 
@@ -93,39 +119,35 @@ def calculate_indicators(df):
     signal_line = macd_line.ewm(span=9, adjust=False).mean()
     df['macd_diff'] = macd_line - signal_line
     
-    # 2. Stochastic RSI (14)
-    # First calculate RSI
+    # 2. Stochastic RSI (14) - Calculated without TA-Lib
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     
-    # Then Stoch RSI
     min_rsi = rsi.rolling(window=14).min()
     max_rsi = rsi.rolling(window=14).max()
     df['stoch_rsi'] = (rsi - min_rsi) / (max_rsi - min_rsi)
     
-    # 3. Price Change
-    df['price_change'] = df['close'].pct_change()
+    # 3. Price Change (Log return for better properties)
+    df['price_change'] = np.log(df['close'] / df['close'].shift(1))
     
-    # 4. Volume Change
-    df['volume_change'] = df['volume'].pct_change()
+    # 4. Volume Change (Log change)
+    df['volume_change'] = np.log(df['volume'] / df['volume'].shift(1))
     
-    # Fill NaNs created by rolling windows
+    # Drop NaNs created by rolling windows
     df.dropna(inplace=True)
     return df
 
 def prepare_features(df, x_days, zeta_days):
     """
     Creates feature columns for X days of history and the Target.
-    Target = 1 if Price(t+zeta) > Price(t), else 0
     """
     data = df.copy()
     feature_cols = []
     
     # Create lag features for X days
-    # For t=0 (today), we want values from t-0, t-1, ..., t-(x-1)
     for i in range(x_days):
         for metric in ['macd_diff', 'stoch_rsi', 'price_change', 'volume_change']:
             col_name = f'{metric}_lag_{i}'
@@ -133,8 +155,6 @@ def prepare_features(df, x_days, zeta_days):
             feature_cols.append(col_name)
             
     # Create Target: Direction ZETA_DAYS ahead
-    # Shift(-zeta) gets the future price. 
-    # Target is 1 (Long) if Future > Current, else 0 (Short)
     data['future_close'] = data['close'].shift(-zeta_days)
     data['target'] = (data['future_close'] > data['close']).astype(int)
     
@@ -145,18 +165,13 @@ def prepare_features(df, x_days, zeta_days):
 
 def calculate_position_size(probability):
     """
-    Calculates position size based on conviction.
-    Prob > 0.5 => Long, Prob < 0.5 => Short.
-    Size is proportional to distance from 0.5.
-    Example:
-      Prob 0.9 -> (0.9 - 0.5) * 2 = 0.8  (80% Long)
-      Prob 0.6 -> (0.6 - 0.5) * 2 = 0.2  (20% Long)
-      Prob 0.2 -> (0.2 - 0.5) * 2 = -0.6 (60% Short)
+    Calculates position size based on conviction (distance from 0.5).
+    Scales probability from [0.0, 1.0] to [-1.0, 1.0].
     """
-    # Normalize 0.0-1.0 to -1.0 to 1.0 range
-    # 0.5 becomes 0.0 (Neutral)
     conviction = (probability - 0.5) * 2
     return conviction
+
+# --- MAIN EXECUTION ---
 
 def main():
     # 1. Fetch Data
@@ -171,8 +186,7 @@ def main():
     print(f"Dataset size after processing: {len(data)} rows")
     print(f"Number of features: {len(features)}")
     
-    # 4. Train / Test Split
-    # We use a time-series split (no random shuffle) to respect causality
+    # 4. Train / Test Split (80/20)
     split_idx = int(len(data) * 0.8)
     train_data = data.iloc[:split_idx]
     test_data = data.iloc[split_idx:]
@@ -182,40 +196,44 @@ def main():
     X_test = test_data[features]
     y_test = test_data['target']
     
-    # 5. Train Model
-    print("Training Logistic Regression...")
-    model = LogisticRegression(max_iter=1000)
+    # --- 5. Feature Scaling ---
+    # Group A: MACD Diff and Stochastic RSI features -> Scale to [-1, 1]
+    # Group B: Price Change and Volume Change features -> Scale to [0, 1]
+    
+    features_neg1_to_1 = [col for col in features if 'macd_diff' in col or 'stoch_rsi' in col]
+    features_0_to_1 = [col for col in features if 'price_change' in col or 'volume_change' in col]
+    
+    # Scaler for [-1, 1] range
+    scaler_neg1_to_1 = CustomMinMaxScaler(-1, 1).fit(X_train[features_neg1_to_1])
+    X_train[features_neg1_to_1] = scaler_neg1_to_1.transform(X_train[features_neg1_to_1])
+    X_test[features_neg1_to_1] = scaler_neg1_to_1.transform(X_test[features_neg1_to_1])
+    
+    # Scaler for [0, 1] range
+    scaler_0_to_1 = CustomMinMaxScaler(0, 1).fit(X_train[features_0_to_1])
+    X_train[features_0_to_1] = scaler_0_to_1.transform(X_train[features_0_to_1])
+    X_test[features_0_to_1] = scaler_0_to_1.transform(X_test[features_0_to_1])
+
+    # 6. Train Model (Max Iterations increased to 10000)
+    print("\nTraining Logistic Regression with Max Iterations 10,000...")
+    model = LogisticRegression(max_iter=10000, solver='lbfgs')
     model.fit(X_train, y_train)
     
-    # 6. Prediction
-    # predict_proba returns [prob_class_0, prob_class_1]
-    # We want prob_class_1 (Probability of Price Going UP)
+    # 7. Prediction
     probs = model.predict_proba(X_test)[:, 1]
     preds = model.predict(X_test)
     
-    # Accuracy
+    # Accuracy Report
     acc = accuracy_score(y_test, preds)
-    print(f"\nModel Accuracy on Test Data: {acc:.4f}")
+    print(f"\nPrediction Accuracy on Test Data: {acc:.4f}")
     print("\nClassification Report:")
     print(classification_report(y_test, preds))
     
-    # 7. Capital Development Backtest
-    # We iterate through the test set day by day.
-    # Note: Even though the target predicts 7 days out, the logic specified is:
-    # "if for each day the prediction direction is followed..."
-    # This implies we take a position today based on the 7-day outlook, and hold it for 1 day (rebalancing daily).
-    
+    # 8. Capital Development Backtest
     capital = INITIAL_CAPITAL
     capital_history = [capital]
     
     test_data = test_data.copy()
     test_data['model_prob'] = probs
-    
-    # Using close-to-close return for the next day to simulate daily PnL
-    # We shift close price back by 1 to get "tomorrow's close" aligned with "today's prediction"
-    # Actually, simpler: Iterate row by row.
-    # Row i: We have prediction. We take position.
-    # Return is (Close[i+1] - Close[i]) / Close[i]
     
     closes = test_data['close'].values
     dates = test_data.index
@@ -233,24 +251,25 @@ def main():
         market_return = (next_price - current_price) / current_price
         
         # Strategy return: Position * Market Return
-        # If we are Short (negative position) and market drops (negative return), we make profit.
         daily_pnl = capital * position_size * market_return
         
         capital += daily_pnl
         capital_history.append(capital)
         
-    # 8. Visualization
+    # 9. Visualization
     final_capital = capital_history[-1]
+    print("-" * 30)
     print(f"Initial Capital: ${INITIAL_CAPITAL:.2f}")
     print(f"Final Capital:   ${final_capital:.2f}")
-    print(f"Return:          {((final_capital - INITIAL_CAPITAL)/INITIAL_CAPITAL)*100:.2f}%")
+    print(f"Strategy Return: {((final_capital - INITIAL_CAPITAL)/INITIAL_CAPITAL)*100:.2f}%")
+    print("-" * 30)
     
     plt.figure(figsize=(12, 6))
     plt.plot(dates[:len(capital_history)], capital_history, label='Strategy Equity')
     
-    # Add a Buy & Hold comparison for context
+    # Add a Buy & Hold comparison for context (only on the test data period)
     buy_hold_return = test_data['close'] / test_data['close'].iloc[0] * INITIAL_CAPITAL
-    plt.plot(test_data.index, buy_hold_return, label='Buy & Hold BTC', alpha=0.5, linestyle='--')
+    plt.plot(test_data.index, buy_hold_return, label='Buy & Hold BTC (Test Period)', alpha=0.5, linestyle='--')
     
     plt.title(f"Capital Development (Logistic Regression Backtest)\nX={X_DAYS}, Target={ZETA_DAYS} Days Ahead")
     plt.xlabel("Date")
