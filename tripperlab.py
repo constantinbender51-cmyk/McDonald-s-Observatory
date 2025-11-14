@@ -2,27 +2,26 @@ import requests
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score
 import matplotlib.pyplot as plt
 import time
 from datetime import datetime
 
 # ==========================================
-# CONFIGURATION - Optimal Parameters
+# CONFIGURATION - Optimal Parameters & Risk
 # ==========================================
 X_DAYS = 24           # Optimal Feature lookback window (X days)
 ZETA_DAYS = 3         # Optimal Target prediction horizon (Zeta days)
-LEVERAGE = 8.0        # Leverage factor (1.0 = no leverage, 5.0 = 5x)
+LEVERAGE = 8.0        # Leverage factor (8.0x)
+STOP_LOSS_PCT = 0.04  # Fixed Stop Loss set at 4.0%
 
 # Constants
 START_DATE = "01 Jan, 2018"
 SYMBOL = "BTCUSDT"
 INITIAL_CAPITAL = 10000
 
-# Stop-Loss Range (Percentage of entry price)
-SL_MIN_PCT = 0.1 / 100  # 0.1% (Original minimum, now unused for fixed SL)
-SL_MAX_PCT = 5.0 / 100 # 10.0% (Used as the FIXED stop loss percentage)
-
+# Logistic Regression Settings
+MAX_ITER = 10000 
 # ==========================================
 
 # --- CUSTOM SCALER CLASS ---
@@ -86,6 +85,7 @@ def get_binance_data(symbol, start_date):
             last_kline_time = data[-1][0]
             start_ts = last_kline_time + 86400000
             
+            # Pause briefly to respect API rate limits
             time.sleep(0.1)
             
             if last_kline_time >= int(time.time() * 1000):
@@ -176,13 +176,6 @@ def calculate_position_size(probability):
     conviction = (probability - 0.5) * 2
     return conviction
 
-def get_dynamic_stop_loss(conviction):
-    """
-    Returns a fixed stop loss percentage, independent of conviction.
-    Uses the maximum defined SL percentage for a fixed risk value.
-    """
-    # *** CHANGE APPLIED HERE: Stop loss is now fixed and does not depend on conviction ***
-    return SL_MAX_PCT
 
 # --- MAIN EXECUTION ---
 
@@ -195,7 +188,7 @@ def main():
     data, features = prepare_features(df_indicators, X_DAYS, ZETA_DAYS)
     
     print("-" * 50)
-    print(f"Running Strategy (X={X_DAYS}, ZETA={ZETA_DAYS}, Leverage={LEVERAGE:.1f}x)")
+    print(f"Running Strategy (X={X_DAYS}, ZETA={ZETA_DAYS}, Leverage={LEVERAGE:.1f}x, SL={STOP_LOSS_PCT*100:.1f}%)")
     print(f"Dataset size after processing: {len(data)} rows")
     print("-" * 50)
 
@@ -215,7 +208,8 @@ def main():
     X_train = train_data[features]
     y_train = train_data['target']
     X_test_1 = test_data_1[features]
-    y_test_1 = test_data_1['target']
+    # y_test_1 is not strictly needed for backtest but kept for accuracy print
+    y_test_1 = test_data_1['target'] 
     
     print(f"Train size: {len(train_data)} | Test 1 size: {len(test_data_1)}")
     
@@ -229,7 +223,7 @@ def main():
     # 5. Train Model (Max Iterations set to 10,000)
     print("\nTraining Logistic Regression...")
     
-    model = LogisticRegression(max_iter=10000, solver='lbfgs', random_state=42)
+    model = LogisticRegression(max_iter=MAX_ITER, solver='lbfgs', random_state=42)
     model.fit(X_train_scaled, y_train)
     
     # 6. Prediction (ONLY on Test Set 1)
@@ -256,7 +250,8 @@ def main():
     backtest_df = backtest_df.iloc[:-1]
 
     # Backtest simulation
-    print("Starting backtest simulation with FIXED stop-loss...")
+    print("\n--- Starting Backtest Log ---")
+    
     for index, row in backtest_df.iterrows():
         entry_price = row['close']
         next_high = row['next_high']
@@ -269,10 +264,9 @@ def main():
         position_size = abs(conviction)
         direction = 1 if conviction > 0 else -1 # 1 for Long, -1 for Short
         
-        # 2. Determine FIXED Stop Loss
-        sl_pct = get_dynamic_stop_loss(conviction) # This now returns SL_MAX_PCT
+        # 2. Determine FIXED Stop Loss price level
+        sl_pct = STOP_LOSS_PCT # Fixed at 4%
         
-        # Calculate actual Stop Loss price level
         if direction == 1: # Long position: Stop loss is BELOW entry price
             sl_price = entry_price * (1 - sl_pct)
         else: # Short position: Stop loss is ABOVE entry price
@@ -300,25 +294,28 @@ def main():
                 trade_pnl_pct = (entry_price - exit_price) / entry_price
         
         # 4. Apply Position Size and Leverage to Capital
-        # Total daily return: (Trade PnL % * Leverage * Position Size)
         daily_return = trade_pnl_pct * LEVERAGE * position_size
         daily_pnl = capital * daily_return
         
         capital += daily_pnl
         capital_history.append(capital)
+        
+        # 5. Log Capital Development with Delay
+        print(f"Date: {index.strftime('%Y-%m-%d')} | Capital: ${capital:.2f}")
+        time.sleep(0.1)
 
     final_capital = capital_history[-1]
     strategy_return_percent = ((final_capital - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100
     
     # 9. Visualization
     dates = backtest_df.index
-    print("-" * 30)
-    print(f"--- Final Strategy Performance (Test Set 1) ---")
-    print(f"Initial Capital: ${INITIAL_CAPITAL:.2f}")
-    print(f"Final Capital:   ${final_capital:.2f}")
-    print(f"Strategy Return: {strategy_return_percent:.2f}%")
-    print(f"Fixed SL: {SL_MAX_PCT*100:.1f}%, Leverage: {LEVERAGE:.1f}x")
-    print("-" * 30)
+    print("\n" + "-" * 45)
+    print(f"--- FINAL SUMMARY (Test Set 1) ---")
+    print(f"Initial Capital:   ${INITIAL_CAPITAL:.2f}")
+    print(f"Final Capital:     ${final_capital:.2f}")
+    print(f"Strategy Return:   {strategy_return_percent:.2f}%")
+    print(f"Fixed SL:          {STOP_LOSS_PCT*100:.1f}%, Leverage: {LEVERAGE:.1f}x")
+    print("-" * 45)
     
     plt.figure(figsize=(12, 6))
     
