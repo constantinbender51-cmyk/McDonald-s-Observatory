@@ -10,7 +10,7 @@ from datetime import datetime
 # ==========================================
 # CONFIGURATION
 # ==========================================
-X_DAYS = 15            # Number of past days to use as features
+X_DAYS = 7            # Number of past days to use as features
 ZETA_DAYS = 7         # Target horizon: Predict price direction ZETA days from now
 START_DATE = "01 Jan, 2018"
 SYMBOL = "BTCUSDT"
@@ -59,6 +59,7 @@ def get_binance_data(symbol, start_date):
     klines = []
     print(f"Fetching data for {symbol} from {start_date}...")
     
+    # Binance limit is 1000 candles per request
     while True:
         params = {
             'symbol': symbol,
@@ -80,6 +81,7 @@ def get_binance_data(symbol, start_date):
             last_kline_time = data[-1][0]
             start_ts = last_kline_time + 86400000
             
+            # Rate limit guard
             time.sleep(0.1)
             
             if last_kline_time >= int(time.time() * 1000):
@@ -108,7 +110,7 @@ def get_binance_data(symbol, start_date):
 
 def calculate_indicators(df):
     """
-    Calculates MACD Diff, Stoch RSI, Price Change, Volume Change
+    Calculates MACD Diff, Stoch RSI, Price Change (Simple PCT), Volume Change (Simple PCT).
     """
     df = df.copy()
     
@@ -119,7 +121,7 @@ def calculate_indicators(df):
     signal_line = macd_line.ewm(span=9, adjust=False).mean()
     df['macd_diff'] = macd_line - signal_line
     
-    # 2. Stochastic RSI (14) - Calculated without TA-Lib
+    # 2. Stochastic RSI (14)
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -130,11 +132,11 @@ def calculate_indicators(df):
     max_rsi = rsi.rolling(window=14).max()
     df['stoch_rsi'] = (rsi - min_rsi) / (max_rsi - min_rsi)
     
-    # 3. Price Change (Log return for better properties)
-    df['price_change'] = np.log(df['close'] / df['close'].shift(1))
+    # 3. Price Change (Simple Percentage Change)
+    df['price_change'] = df['close'].pct_change()
     
-    # 4. Volume Change (Log change)
-    df['volume_change'] = np.log(df['volume'] / df['volume'].shift(1))
+    # 4. Volume Change (Simple Percentage Change)
+    df['volume_change'] = df['volume'].pct_change()
     
     # Drop NaNs created by rolling windows
     df.dropna(inplace=True)
@@ -151,6 +153,7 @@ def prepare_features(df, x_days, zeta_days):
     for i in range(x_days):
         for metric in ['macd_diff', 'stoch_rsi', 'price_change', 'volume_change']:
             col_name = f'{metric}_lag_{i}'
+            # Shift data back i days to represent history
             data[col_name] = data[metric].shift(i)
             feature_cols.append(col_name)
             
@@ -196,29 +199,24 @@ def main():
     X_test = test_data[features]
     y_test = test_data['target']
     
-    # --- 5. Feature Scaling ---
-    # Group A: MACD Diff and Stochastic RSI features -> Scale to [-1, 1]
-    # Group B: Price Change and Volume Change features -> Scale to [0, 1]
+    # --- 5. Feature Scaling (All features to [-1, 1]) ---
+    print(f"Scaling all {len(features)} features to the [-1, 1] range...")
     
-    features_neg1_to_1 = [col for col in features if 'macd_diff' in col or 'stoch_rsi' in col]
-    features_0_to_1 = [col for col in features if 'price_change' in col or 'volume_change' in col]
+    # Initialize and fit the scaler ONLY on the training data (to prevent look-ahead bias)
+    all_features_scaler = CustomMinMaxScaler(-1, 1).fit(X_train[features])
     
-    # Scaler for [-1, 1] range
-    scaler_neg1_to_1 = CustomMinMaxScaler(-1, 1).fit(X_train[features_neg1_to_1])
-    X_train[features_neg1_to_1] = scaler_neg1_to_1.transform(X_train[features_neg1_to_1])
-    X_test[features_neg1_to_1] = scaler_neg1_to_1.transform(X_test[features_neg1_to_1])
+    # Transform both training and test data using the fitted scaler
+    X_train[features] = all_features_scaler.transform(X_train[features])
+    X_test[features] = all_features_scaler.transform(X_test[features])
     
-    # Scaler for [0, 1] range
-    scaler_0_to_1 = CustomMinMaxScaler(0, 1).fit(X_train[features_0_to_1])
-    X_train[features_0_to_1] = scaler_0_to_1.transform(X_train[features_0_to_1])
-    X_test[features_0_to_1] = scaler_0_to_1.transform(X_test[features_0_to_1])
-
-    # 6. Train Model (Max Iterations increased to 10000)
+    # 6. Train Model (Max Iterations set to 10,000)
     print("\nTraining Logistic Regression with Max Iterations 10,000...")
+    
     model = LogisticRegression(max_iter=10000, solver='lbfgs')
     model.fit(X_train, y_train)
     
     # 7. Prediction
+    # We use prob_class_1 (Probability of Price Going UP)
     probs = model.predict_proba(X_test)[:, 1]
     preds = model.predict(X_test)
     
@@ -247,10 +245,10 @@ def main():
         # Calculate conviction/position size (-1.0 to 1.0)
         position_size = calculate_position_size(prob)
         
-        # Calculate daily market return
+        # Calculate daily market return (simple percentage change)
         market_return = (next_price - current_price) / current_price
         
-        # Strategy return: Position * Market Return
+        # Strategy PnL: Capital * Position Size * Market Return
         daily_pnl = capital * position_size * market_return
         
         capital += daily_pnl
