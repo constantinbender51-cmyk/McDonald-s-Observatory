@@ -17,7 +17,7 @@ fetch_started = False
 # Configuration
 START_DATE = "2018-01-01 00:00:00"
 END_DATE = datetime.now()  # Fetch until now
-CANDLES_TO_FETCH = 4000  # For testing - will fetch all available if set to None
+CANDLES_TO_FETCH = None  # For testing - will fetch all available if set to None
 SYMBOL = "BTCUSDT"
 INTERVAL = "1m"
 
