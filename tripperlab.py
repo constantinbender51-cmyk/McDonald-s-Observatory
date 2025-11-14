@@ -12,11 +12,17 @@ from datetime import datetime
 # ==========================================
 X_DAYS = 24           # Optimal Feature lookback window (X days)
 ZETA_DAYS = 3         # Optimal Target prediction horizon (Zeta days)
+LEVERAGE = 1.0        # Leverage factor (1.0 = no leverage, 5.0 = 5x)
 
 # Constants
 START_DATE = "01 Jan, 2018"
 SYMBOL = "BTCUSDT"
 INITIAL_CAPITAL = 10000
+
+# Stop-Loss Range (Percentage of entry price)
+SL_MIN_PCT = 0.1 / 100  # 0.1% (for low conviction)
+SL_MAX_PCT = 10.0 / 100 # 10.0% (for high conviction)
+
 # ==========================================
 
 # --- CUSTOM SCALER CLASS ---
@@ -98,6 +104,7 @@ def get_binance_data(symbol, start_date):
         'taker_buy_base', 'taker_buy_quote', 'ignore'
     ])
     
+    # We now need high/low for the backtest
     numeric_cols = ['open', 'high', 'low', 'close', 'volume']
     df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, axis=1)
     df['date'] = pd.to_datetime(df['open_time'], unit='ms')
@@ -165,8 +172,23 @@ def calculate_position_size(probability):
     Calculates position size based on conviction (distance from 0.5).
     Scales probability from [0.0, 1.0] to [-1.0, 1.0].
     """
+    # Conviction is the distance from 0.5 (max 0.5), scaled to max 1.0
     conviction = (probability - 0.5) * 2
     return conviction
+
+def get_dynamic_stop_loss(conviction):
+    """
+    Calculates the stop loss percentage based on conviction,
+    where high ABS(conviction) means a WIDER stop loss (10.0%)
+    and low ABS(conviction) means a NARROWER stop loss (0.1%).
+    """
+    abs_conviction = abs(conviction) # Range 0.0 to 1.0
+    
+    # Linear interpolation: SL_MIN_PCT + (abs_conviction * (SL_MAX_PCT - SL_MIN_PCT))
+    # This makes SL proportional to conviction (as requested)
+    
+    sl_pct = SL_MIN_PCT + (abs_conviction * (SL_MAX_PCT - SL_MIN_PCT))
+    return sl_pct
 
 # --- MAIN EXECUTION ---
 
@@ -179,9 +201,8 @@ def main():
     data, features = prepare_features(df_indicators, X_DAYS, ZETA_DAYS)
     
     print("-" * 50)
-    print(f"Executing Single Run with Optimal Parameters: X={X_DAYS}, ZETA={ZETA_DAYS}")
+    print(f"Running Strategy (X={X_DAYS}, ZETA={ZETA_DAYS}, Leverage={LEVERAGE:.1f}x)")
     print(f"Dataset size after processing: {len(data)} rows")
-    print(f"Number of features: {len(features)}")
     print("-" * 50)
 
     if len(data) < 100:
@@ -195,7 +216,6 @@ def main():
 
     train_data = data.iloc[:split_idx_1]
     test_data_1 = data.iloc[split_idx_1:split_idx_2]
-    # test_data_2 is created but not used for performance tracking
     
     # Prepare sets for ML
     X_train = train_data[features]
@@ -209,7 +229,6 @@ def main():
     print(f"Scaling {len(features)} features to the [-1, 1] range, based on training data...")
     
     all_features_scaler = CustomMinMaxScaler(-1, 1).fit(X_train)
-    
     X_train_scaled = all_features_scaler.transform(X_train)
     X_test_1_scaled = all_features_scaler.transform(X_test_1)
     
@@ -225,27 +244,71 @@ def main():
     
     # 7. Accuracy Report
     acc = accuracy_score(y_test_1, preds_1)
-    print(f"\n--- Results on Test Set 1 (15% of data) ---")
-    print(f"Prediction Accuracy: {acc:.4f}")
-    print("\nClassification Report (Test Set 1):")
-    print(classification_report(y_test_1, preds_1))
+    print(f"\n--- Prediction Accuracy on Test Set 1: {acc:.4f} ---")
     
     # 8. Capital Development Backtest (ONLY on Test Set 1)
     capital = INITIAL_CAPITAL
-    
-    closes = test_data_1['close'].values
-    model_probs = probs_1
     capital_history = [capital]
     
-    for i in range(len(test_data_1) - 1):
-        current_price = closes[i]
-        next_price = closes[i+1]
-        prob = model_probs[i]
+    # Combine predictions and necessary data for backtest
+    backtest_df = test_data_1[['close', 'high', 'low']].copy()
+    # Shift high/low back by 1 day so that index i has entry price (close[i]) and exit info (high[i+1], low[i+1], close[i+1])
+    backtest_df['next_close'] = backtest_df['close'].shift(-1)
+    backtest_df['next_high'] = backtest_df['high'].shift(-1)
+    backtest_df['next_low'] = backtest_df['low'].shift(-1)
+    backtest_df['model_prob'] = probs_1
+    
+    # Remove the last row which has no next day data
+    backtest_df = backtest_df.iloc[:-1]
+
+    # Backtest simulation
+    print("Starting backtest simulation with dynamic stop-loss...")
+    for index, row in backtest_df.iterrows():
+        entry_price = row['close']
+        next_high = row['next_high']
+        next_low = row['next_low']
+        exit_price = row['next_close']
+        prob = row['model_prob']
         
-        position_size = calculate_position_size(prob)
-        market_return = (next_price - current_price) / current_price
+        # 1. Determine Position and Size
+        conviction = calculate_position_size(prob)
+        position_size = abs(conviction)
+        direction = 1 if conviction > 0 else -1 # 1 for Long, -1 for Short
         
-        daily_pnl = capital * position_size * market_return
+        # 2. Determine Dynamic Stop Loss
+        sl_pct = get_dynamic_stop_loss(conviction)
+        
+        # Calculate actual Stop Loss price level
+        if direction == 1: # Long position: Stop loss is BELOW entry price
+            sl_price = entry_price * (1 - sl_pct)
+        else: # Short position: Stop loss is ABOVE entry price
+            sl_price = entry_price * (1 + sl_pct)
+            
+        # 3. Simulate Daily PnL
+        trade_pnl_pct = 0.0
+        
+        if direction == 1: # Long
+            # Check if stop loss was hit (next day low went below SL price)
+            if next_low <= sl_price:
+                # Loss is capped at SL_PCT
+                trade_pnl_pct = -sl_pct
+            else:
+                # PnL is based on closing price change
+                trade_pnl_pct = (exit_price - entry_price) / entry_price
+        
+        else: # Short
+            # Check if stop loss was hit (next day high went above SL price)
+            if next_high >= sl_price:
+                # Loss is capped at SL_PCT
+                trade_pnl_pct = -sl_pct
+            else:
+                # PnL is based on closing price change (inverted for short)
+                trade_pnl_pct = (entry_price - exit_price) / entry_price
+        
+        # 4. Apply Position Size and Leverage to Capital
+        # Total daily return: (Trade PnL % * Leverage * Position Size)
+        daily_return = trade_pnl_pct * LEVERAGE * position_size
+        daily_pnl = capital * daily_return
         
         capital += daily_pnl
         capital_history.append(capital)
@@ -254,23 +317,28 @@ def main():
     strategy_return_percent = ((final_capital - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100
     
     # 9. Visualization
-    dates = test_data_1.index
+    dates = backtest_df.index
     print("-" * 30)
-    print(f"--- Strategy Performance (Test Set 1) ---")
+    print(f"--- Final Strategy Performance (Test Set 1) ---")
     print(f"Initial Capital: ${INITIAL_CAPITAL:.2f}")
     print(f"Final Capital:   ${final_capital:.2f}")
     print(f"Strategy Return: {strategy_return_percent:.2f}%")
+    print(f"Max SL: {SL_MAX_PCT*100:.1f}%, Min SL: {SL_MIN_PCT*100:.1f}%, Leverage: {LEVERAGE:.1f}x")
     print("-" * 30)
     
     plt.figure(figsize=(12, 6))
     
     # Calculate Buy & Hold for comparison
-    buy_hold_return = test_data_1['close'] / test_data_1['close'].iloc[0] * INITIAL_CAPITAL
+    buy_hold_data = test_data_1.copy()
+    buy_hold_return = buy_hold_data['close'] / buy_hold_data['close'].iloc[0] * INITIAL_CAPITAL
     
-    plt.plot(dates[:len(capital_history)], capital_history, label='Strategy Equity')
-    plt.plot(dates, buy_hold_return, label='Buy & Hold BTC (Test Set 1)', alpha=0.5, linestyle='--')
+    # Plot strategy equity (using dates aligned with the backtest results)
+    plt.plot(dates[:len(capital_history)-1], capital_history[:-1], label='Strategy Equity')
     
-    plt.title(f"Capital Development for Optimal Strategy (X={X_DAYS}, Z={ZETA_DAYS})")
+    # Plot Buy & Hold (using original test set dates)
+    plt.plot(buy_hold_data.index, buy_hold_return, label='Buy & Hold BTC (Test Set 1)', alpha=0.5, linestyle='--')
+    
+    plt.title(f"Capital Development for ML Strategy (X={X_DAYS}, Z={ZETA_DAYS})")
     plt.xlabel("Date")
     plt.ylabel("Capital ($)")
     plt.legend()
