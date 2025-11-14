@@ -20,8 +20,8 @@ SYMBOL = "BTCUSDT"
 INITIAL_CAPITAL = 10000
 
 # Stop-Loss Range (Percentage of entry price)
-SL_MIN_PCT = 0.1 / 100  # 0.1% (for low conviction)
-SL_MAX_PCT = 10.0 / 100 # 10.0% (for high conviction)
+SL_MIN_PCT = 0.1 / 100  # 0.1% (Original minimum, now unused for fixed SL)
+SL_MAX_PCT = 5.0 / 100 # 10.0% (Used as the FIXED stop loss percentage)
 
 # ==========================================
 
@@ -178,17 +178,11 @@ def calculate_position_size(probability):
 
 def get_dynamic_stop_loss(conviction):
     """
-    Calculates the stop loss percentage based on conviction,
-    where high ABS(conviction) means a WIDER stop loss (10.0%)
-    and low ABS(conviction) means a NARROWER stop loss (0.1%).
+    Returns a fixed stop loss percentage, independent of conviction.
+    Uses the maximum defined SL percentage for a fixed risk value.
     """
-    abs_conviction = abs(conviction) # Range 0.0 to 1.0
-    
-    # Linear interpolation: SL_MIN_PCT + (abs_conviction * (SL_MAX_PCT - SL_MIN_PCT))
-    # This makes SL proportional to conviction (as requested)
-    
-    sl_pct = SL_MIN_PCT + (abs_conviction * (SL_MAX_PCT - SL_MIN_PCT))
-    return sl_pct
+    # *** CHANGE APPLIED HERE: Stop loss is now fixed and does not depend on conviction ***
+    return SL_MAX_PCT
 
 # --- MAIN EXECUTION ---
 
@@ -262,7 +256,7 @@ def main():
     backtest_df = backtest_df.iloc[:-1]
 
     # Backtest simulation
-    print("Starting backtest simulation with dynamic stop-loss...")
+    print("Starting backtest simulation with FIXED stop-loss...")
     for index, row in backtest_df.iterrows():
         entry_price = row['close']
         next_high = row['next_high']
@@ -275,8 +269,8 @@ def main():
         position_size = abs(conviction)
         direction = 1 if conviction > 0 else -1 # 1 for Long, -1 for Short
         
-        # 2. Determine Dynamic Stop Loss
-        sl_pct = get_dynamic_stop_loss(conviction)
+        # 2. Determine FIXED Stop Loss
+        sl_pct = get_dynamic_stop_loss(conviction) # This now returns SL_MAX_PCT
         
         # Calculate actual Stop Loss price level
         if direction == 1: # Long position: Stop loss is BELOW entry price
@@ -323,7 +317,7 @@ def main():
     print(f"Initial Capital: ${INITIAL_CAPITAL:.2f}")
     print(f"Final Capital:   ${final_capital:.2f}")
     print(f"Strategy Return: {strategy_return_percent:.2f}%")
-    print(f"Max SL: {SL_MAX_PCT*100:.1f}%, Min SL: {SL_MIN_PCT*100:.1f}%, Leverage: {LEVERAGE:.1f}x")
+    print(f"Fixed SL: {SL_MAX_PCT*100:.1f}%, Leverage: {LEVERAGE:.1f}x")
     print("-" * 30)
     
     plt.figure(figsize=(12, 6))
