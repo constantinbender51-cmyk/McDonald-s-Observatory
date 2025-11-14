@@ -27,7 +27,7 @@ BATCH_SIZE = 32
 LAG = 48 # Predict 2 days (48 hours) ahead
 RESULTS_FILE = 'backtest_results.json'
 HTML_FILE = 'backtest_visualization.html'
-PORT = 8000 # Standard port for simple HTTP server
+PORT = 8080 # Standard port for simple HTTP server
 
 # --- Data Retrieval & Model Functions ---
 
