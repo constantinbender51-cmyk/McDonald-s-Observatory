@@ -164,10 +164,11 @@ def index():
 @app.route('/progress')
 def progress_stream():
     def generate():
+        import json
         while not is_complete:
-            yield f"data: {{'progress': {progress}, 'complete': false}}\n\n"
+            yield f"data: {json.dumps({'progress': progress, 'complete': False})}\n\n"
             time.sleep(0.5)
-        yield f"data: {{'progress': 100, 'complete': true}}\n\n"
+        yield f"data: {json.dumps({'progress': 100, 'complete': True})}\n\n"
     
     return Response(generate(), mimetype='text/event-stream')
 
