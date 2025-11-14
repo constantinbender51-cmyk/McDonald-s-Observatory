@@ -9,7 +9,7 @@ import time
 import json
 import http.server
 import socketserver
-import os # To change directory for serving files
+import os 
 
 # Note: Network calls will fail in this sandboxed environment, but the logic is correct.
 try:
@@ -29,7 +29,7 @@ RESULTS_FILE = 'backtest_results.json'
 HTML_FILE = 'backtest_visualization.html'
 PORT = 8000 # Standard port for simple HTTP server
 
-# --- Data Retrieval & Model Functions (Unchanged from previous version) ---
+# --- Data Retrieval & Model Functions ---
 
 def fetch_binance_data(symbol, timeframe, start_date):
     """
@@ -98,6 +98,7 @@ def preprocess_and_feature_engineer(df, window_size=WINDOW_SIZE, lag=LAG):
     print("\n--- Data Preprocessing & Feature Engineering ---")
 
     df = df.copy()
+    # 1. Initial cleaning of input OHLCV
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.fillna(method='ffill', inplace=True)
     df.fillna(method='bfill', inplace=True)
@@ -106,14 +107,20 @@ def preprocess_and_feature_engineer(df, window_size=WINDOW_SIZE, lag=LAG):
         print(f"Error: Not enough data ({len(df)}) after cleaning.")
         return None, None, None, None
         
+    # Calculate Log Return (Target Variable)
+    # This can generate -inf if Close/Close.shift(-lag) is 0 (or near zero)
     df['Log_Return'] = np.log(df['Close'] / df['Close'].shift(-lag)) 
     df.dropna(subset=['Log_Return'], inplace=True)
     
+    # Calculate Features (Indicators)
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    RS = gain / loss
-    df['RSI'] = 100 - (100 / (1 + RS))
+    
+    # Calculate RS. This step will generate inf if loss is 0. (As desired by the user's dropout mechanism)
+    RS = gain / loss 
+    df['RSI'] = 100 - (100 / (1 + RS)) # RSI will be calculated from inf if RS is inf
+
     high_low = df['High'] - df['Low']
     high_prev_close = np.abs(df['High'] - df['Close'].shift(1))
     low_prev_close = np.abs(df['Low'] - df['Close'].shift(1))
@@ -122,19 +129,29 @@ def preprocess_and_feature_engineer(df, window_size=WINDOW_SIZE, lag=LAG):
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     df['SMA_Diff'] = df['SMA_50'] - df['SMA_200']
+    
+    # Volume Change: Can generate inf if previous volume was 0.
     df['Volume_Change'] = df['Volume'].pct_change()
     
     features = ['Open', 'High', 'Low', 'Close', 'Volume', 'RSI', 'ATR', 'SMA_Diff', 'Volume_Change']
     target = 'Log_Return'
 
+    # CRITICAL: Convert ALL infinite values (from Log_Return, RSI, Volume_Change, etc.) to NaN
+    # This prepares the data for complete row dropout.
+    df.replace([np.inf, -np.inf], np.nan, inplace=True) 
+    
+    # Drop all rows that now contain NaN. This removes the rows where inf values were generated.
     df.dropna(inplace=True) 
-    print(f"Data length after indicator calculation: {len(df)}")
+    print(f"Data length after indicator calculation and clean dropout: {len(df)}")
 
+    # 3. Normalization
     feature_data = df[features].values
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_features = scaler.fit_transform(feature_data)
+
     target_data = df[target].values
     
+    # 4. Sequence Creation for LSTM
     X, Y = [], []
     for i in range(len(scaled_features) - window_size):
         X.append(scaled_features[i:i + window_size])
