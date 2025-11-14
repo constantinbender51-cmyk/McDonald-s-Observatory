@@ -12,7 +12,7 @@ from datetime import datetime
 # ==========================================
 X_DAYS = 24           # Optimal Feature lookback window (X days)
 ZETA_DAYS = 3         # Optimal Target prediction horizon (Zeta days)
-LEVERAGE = 2.0        # Leverage factor (1.0 = no leverage, 5.0 = 5x)
+LEVERAGE = 4.0        # Leverage factor (1.0 = no leverage, 5.0 = 5x)
 
 # Constants
 START_DATE = "01 Jan, 2018"
