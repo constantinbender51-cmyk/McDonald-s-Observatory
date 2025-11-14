@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Trading Strategy Backtest Report</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Chart.js for plotting -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <!-- Load Chart.js Adapter for date/time handling -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    
+    <!-- Configure Tailwind for custom colors/font -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#0070f3', // Blue
+                        'secondary': '#10b981', // Emerald green
+                        'background': '#f9fafb', // Light gray background
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        
+        .card {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+        }
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body class="bg-background min-h-screen p-4 md:p-8 font-sans">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-2">LSTM Trading Backtest Report</h1>
+            <p id="metadata-summary" class="text-gray-500 italic"></p>
+        </header>
+
+        <!-- Metrics Section -->
+        <div id="metrics-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+            <div class="card bg-white p-6 rounded-xl border border-gray-200">
+                <p class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Total Strategy Return</p>
+                <p id="strategy-return" class="metric-value text-secondary mt-2">--</p>
+            </div>
+            <div class="card bg-white p-6 rounded-xl border border-gray-200">
+                <p class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Buy & Hold Return</p>
+                <p id="market-return" class="metric-value text-primary mt-2">--</p>
+            </div>
+            <div class="card bg-white p-6 rounded-xl border border-gray-200">
+                <p class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Sharpe Ratio</p>
+                <p id="sharpe-ratio" class="metric-value text-gray-900 mt-2">--</p>
+            </div>
+            <div class="card bg-white p-6 rounded-xl border border-gray-200">
+                <p class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Max Drawdown</p>
+                <p id="max-drawdown" class="metric-value text-red-500 mt-2">--</p>
+            </div>
+        </div>
+
+        <!-- Cumulative Return Chart -->
+        <div class="card bg-white p-6 rounded-xl border border-gray-200">
+            <h2 class="text-2xl font-bold text-gray-900 mb-4">Cumulative Performance</h2>
+            <div class="relative h-96">
+                <canvas id="cumulativeChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Error Message -->
+        <div id="error-message" class="hidden mt-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg" role="alert">
+            <p class="font-bold">Error Loading Results</p>
+            <p>Could not find or parse 'backtest_results.json'. Please ensure the Python script ran successfully and generated the file in the same directory.</p>
+            <p class="mt-2 text-sm italic">Showing Mock Data for demonstration purposes.</p>
+        </div>
+
+    </div>
+
+    <script>
+        const RESULTS_FILE = 'backtest_results.json';
+        const HTML_FILE = 'backtest_visualization.html';
+
+        /**
+         * Loads the results JSON or generates mock data on failure (like in the sandbox).
+         * @returns {Promise<object>} The results data.
+         */
+        async function loadResults() {
+            try {
+                const response = await fetch(RESULTS_FILE);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                document.getElementById('error-message').classList.add('hidden');
+                return await response.json();
+            } catch (error) {
+                console.error("Failed to fetch real results, falling back to mock data:", error);
+                document.getElementById('error-message').classList.remove('hidden');
+                return generateMockResults();
+            }
+        }
+
+        /**
+         * Generates mock data for visualization when the real file cannot be loaded.
+         */
+        function generateMockResults() {
+            const numPoints = 150;
+            const dates = Array.from({ length: numPoints }, (_, i) => new Date(new Date().setDate(new Date().getDate() - numPoints + i)).toISOString());
+            const buyHold = [1];
+            const strategy = [1];
+
+            // Generate two slightly different walk series
+            for (let i = 1; i < numPoints; i++) {
+                buyHold.push(buyHold[i - 1] * (1 + (Math.random() - 0.5) * 0.01 + 0.0005));
+                strategy.push(strategy[i - 1] * (1 + (Math.random() - 0.5) * 0.01 + 0.0015));
+            }
+            
+            const totalStrategyReturn = strategy[numPoints - 1] - 1;
+            const totalMarketReturn = buyHold[numPoints - 1] - 1;
+
+            return {
+                metadata: {
+                    symbol: 'BTC/USDT',
+                    timeframe: '1h',
+                    lookback_h: 72,
+                    prediction_h: 48,
+                    epochs: 5,
+                    start_date: dates[0].substring(0, 10),
+                    end_date: dates[numPoints - 1].substring(0, 10),
+                    total_periods: numPoints
+                },
+                metrics: {
+                    total_market_return: totalMarketReturn,
+                    total_strategy_return: totalStrategyReturn,
+                    sharpe_ratio: 1.25,
+                    max_drawdown: 0.15
+                },
+                chart_data: {
+                    timestamps: dates,
+                    buy_hold: buyHold,
+                    strategy_return: strategy
+                }
+            };
+        }
+
+        /**
+         * Renders the key metrics on the dashboard.
+         */
+        function renderMetrics(metrics) {
+            document.getElementById('strategy-return').textContent = (metrics.total_strategy_return * 100).toFixed(2) + '%';
+            document.getElementById('market-return').textContent = (metrics.total_market_return * 100).toFixed(2) + '%';
+            document.getElementById('sharpe-ratio').textContent = metrics.sharpe_ratio.toFixed(2);
+            document.getElementById('max-drawdown').textContent = (metrics.max_drawdown * 100).toFixed(2) + '%';
+
+            // Set color based on performance
+            document.getElementById('strategy-return').classList.toggle('text-secondary', metrics.total_strategy_return > 0);
+            document.getElementById('strategy-return').classList.toggle('text-red-500', metrics.total_strategy_return <= 0);
+        }
+        
+        /**
+         * Renders the metadata summary.
+         */
+        function renderMetadata(metadata) {
+             const summary = `Asset: ${metadata.symbol} | Timeframe: ${metadata.timeframe} | Lookback: ${metadata.lookback_h}h | Predict: ${metadata.prediction_h}h | Periods: ${metadata.total_periods} | Range: ${metadata.start_date} to ${metadata.end_date}`;
+             document.getElementById('metadata-summary').textContent = summary;
+        }
+
+        /**
+         * Renders the cumulative performance chart using Chart.js.
+         */
+        function renderChart(chartData) {
+            const ctx = document.getElementById('cumulativeChart').getContext('2d');
+            
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.timestamps,
+                    datasets: [
+                        {
+                            label: 'NN Strategy',
+                            data: chartData.strategy_return,
+                            borderColor: '#10b981', // secondary
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.2
+                        },
+                        {
+                            label: 'Buy & Hold (Benchmark)',
+                            data: chartData.buy_hold,
+                            borderColor: '#0070f3', // primary
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.2,
+                            borderDash: [5, 5]
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                parser: 'YYYY-MM-DDTHH:mm:ss.sssZ',
+                                tooltipFormat: 'MMM D, YYYY HH:mm',
+                                unit: 'month' 
+                            },
+                            title: { display: true, text: 'Time' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Cumulative Return (Starting at 1.0)' },
+                            ticks: {
+                                callback: function(value, index, ticks) {
+                                    return (value * 100).toFixed(0) + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        /**
+         * Main function to initialize the report.
+         */
+        async function initializeReport() {
+            const results = await loadResults();
+            if (results && results.metrics && results.chart_data) {
+                renderMetadata(results.metadata);
+                renderMetrics(results.metrics);
+                renderChart(results.chart_data);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeReport);
+    </script>
+</body>
+</html>
+
