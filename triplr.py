@@ -3,9 +3,11 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import classification_report, accuracy_score
+from sklearn.metrics import classification_report, accuracy_score, precision_score
 import requests
 import warnings
+from datetime import datetime, timedelta
+import time
 warnings.filterwarnings('ignore')
 
 class AdaptiveTimeframeBitcoinPredictor:
@@ -21,38 +23,74 @@ class AdaptiveTimeframeBitcoinPredictor:
         self.feature_columns = None
         self.binance_client = None
         
-    def fetch_binance_ohlcv(self, symbol='BTCUSDT', interval='1m', limit=1000):
-        """Fetch OHLCV data from Binance API"""
+    def fetch_binance_ohlcv_chunked(self, symbol='BTCUSDT', interval='1m', start_time=None, end_time=None, limit=1000):
+        """Fetch OHLCV data from Binance API in chunks to overcome 1000 limit"""
         base_url = "https://api.binance.com/api/v3/klines"
-        params = {
-            'symbol': symbol,
-            'interval': interval,
-            'limit': limit
-        }
         
-        try:
-            response = requests.get(base_url, params=params)
-            data = response.json()
+        all_data = []
+        current_start = start_time
+        
+        while True:
+            params = {
+                'symbol': symbol,
+                'interval': interval,
+                'limit': limit
+            }
             
-            df = pd.DataFrame(data, columns=[
-                'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                'close_time', 'quote_asset_volume', 'number_of_trades',
-                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-            ])
-            
-            # Convert to proper data types
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            for col in ['open', 'high', 'low', 'close', 'volume']:
-                df[col] = df[col].astype(float)
+            if current_start:
+                params['startTime'] = current_start
+            if end_time:
+                params['endTime'] = end_time
                 
-            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-            df.set_index('timestamp', inplace=True)
-            
-            return df
-            
-        except Exception as e:
-            print(f"Error fetching data: {e}")
+            try:
+                response = requests.get(base_url, params=params)
+                data = response.json()
+                
+                if not data:
+                    break
+                    
+                all_data.extend(data)
+                
+                # If we got less than limit, we've reached the end
+                if len(data) < limit:
+                    break
+                    
+                # Move start time to the last timestamp + 1
+                last_timestamp = data[-1][0]
+                current_start = last_timestamp + 1
+                
+                # Rate limiting
+                time.sleep(0.1)
+                
+            except Exception as e:
+                print(f"Error fetching data: {e}")
+                break
+        
+        if not all_data:
             return None
+            
+        df = pd.DataFrame(all_data, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+        ])
+        
+        # Convert to proper data types
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+            
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df.set_index('timestamp', inplace=True)
+        df = df.sort_index()
+        
+        return df
+    
+    def calculate_start_time(self, days_back):
+        """Calculate start time for given days back from now"""
+        end_time = datetime.now()
+        start_time = end_time - timedelta(days=days_back)
+        return int(start_time.timestamp() * 1000)  # Convert to milliseconds
     
     def create_adaptive_dataset(self):
         """
@@ -62,48 +100,80 @@ class AdaptiveTimeframeBitcoinPredictor:
         - Long-term (last 2 years): 1-day intervals
         - Historical (beyond 2 years): 1-week intervals
         """
-        print("Fetching adaptive timeframe data from Binance...")
+        print("Fetching adaptive timeframe data from Binance (chunked requests)...")
         
         datasets = []
         
-        # Recent data: 1-minute (last 7 days = 7*24*60 = 10,080 minutes)
-        recent_1m = self.fetch_binance_ohlcv(interval='1m', limit=10080)
-        if recent_1m is not None:
+        # Recent data: 1-minute (last 7 days = 10,080 minutes)
+        print("Fetching 1-minute data (last 7 days)...")
+        recent_1m = self.fetch_binance_ohlcv_chunked(
+            interval='1m',
+            start_time=self.calculate_start_time(7)
+        )
+        if recent_1m is not None and len(recent_1m) > 0:
             recent_1m['timeframe'] = '1m'
             datasets.append(recent_1m)
+            print(f"Fetched {len(recent_1m)} 1-minute candles")
         
         # Medium-term: 1-hour (last 90 days = 2160 hours)
-        medium_1h = self.fetch_binance_ohlcv(interval='1h', limit=2160)
-        if medium_1h is not None:
+        print("Fetching 1-hour data (last 90 days)...")
+        medium_1h = self.fetch_binance_ohlcv_chunked(
+            interval='1h',
+            start_time=self.calculate_start_time(90)
+        )
+        if medium_1h is not None and len(medium_1h) > 0:
             medium_1h['timeframe'] = '1h'
             # Remove overlap with 1m data
-            cutoff = recent_1m.index.max() if recent_1m is not None else pd.Timestamp.now()
-            medium_1h = medium_1h[medium_1h.index < cutoff]
+            if recent_1m is not None and len(recent_1m) > 0:
+                cutoff = recent_1m.index.max()
+                medium_1h = medium_1h[medium_1h.index < cutoff]
             datasets.append(medium_1h)
+            print(f"Fetched {len(medium_1h)} 1-hour candles")
         
-        # Long-term: 1-day (last 730 days)
-        long_1d = self.fetch_binance_ohlcv(interval='1d', limit=730)
-        if long_1d is not None:
+        # Long-term: 1-day (last 730 days = 2 years)
+        print("Fetching 1-day data (last 2 years)...")
+        long_1d = self.fetch_binance_ohlcv_chunked(
+            interval='1d',
+            start_time=self.calculate_start_time(730)
+        )
+        if long_1d is not None and len(long_1d) > 0:
             long_1d['timeframe'] = '1d'
-            cutoff = medium_1h.index.max() if medium_1h is not None else pd.Timestamp.now()
-            long_1d = long_1d[long_1d.index < cutoff]
+            # Remove overlap with 1h data
+            if medium_1h is not None and len(medium_1h) > 0:
+                cutoff = medium_1h.index.max()
+                long_1d = long_1d[long_1d.index < cutoff]
             datasets.append(long_1d)
+            print(f"Fetched {len(long_1d)} 1-day candles")
         
-        # Historical: 1-week (as much as available)
-        historical_1w = self.fetch_binance_ohlcv(interval='1w', limit=520)  # ~10 years
-        if historical_1w is not None:
+        # Historical: 1-week (last 5 years = ~260 weeks)
+        print("Fetching 1-week data (last 5 years)...")
+        historical_1w = self.fetch_binance_ohlcv_chunked(
+            interval='1w',
+            start_time=self.calculate_start_time(1825)  # 5 years
+        )
+        if historical_1w is not None and len(historical_1w) > 0:
             historical_1w['timeframe'] = '1w'
-            cutoff = long_1d.index.max() if long_1d is not None else pd.Timestamp.now()
-            historical_1w = historical_1w[historical_1w.index < cutoff]
+            # Remove overlap with 1d data
+            if long_1d is not None and len(long_1d) > 0:
+                cutoff = long_1d.index.max()
+                historical_1w = historical_1w[historical_1w.index < cutoff]
             datasets.append(historical_1w)
+            print(f"Fetched {len(historical_1w)} 1-week candles")
+        
+        if not datasets:
+            print("No data fetched from any timeframe")
+            return None
         
         # Combine all datasets
         combined_df = pd.concat(datasets).sort_index()
         combined_df = combined_df[~combined_df.index.duplicated(keep='first')]
         
-        print(f"Created adaptive dataset with {len(combined_df)} data points")
+        print(f"\nCreated adaptive dataset with {len(combined_df)} total data points")
         print(f"Timeframe distribution:")
-        print(combined_df['timeframe'].value_counts())
+        print(combined_df['timeframe'].value_counts().sort_index())
+        
+        # Print date range
+        print(f"Date range: {combined_df.index.min()} to {combined_df.index.max()}")
         
         return combined_df
     
@@ -164,7 +234,7 @@ class AdaptiveTimeframeBitcoinPredictor:
         # Statistical features
         df['z_score_20'] = (df['close'] - df['close'].rolling(20).mean()) / df['close'].rolling(20).std()
         df['skewness_20'] = df['returns'].rolling(20).skew()
-        df['kurtosis_20'] = df['returns'].rolling(20).kurtosis()
+        df['kurtosis_20'] = df['returns'].rolling(20).kurt()
         
         # Time-based features
         df['hour_of_day'] = df.index.hour
@@ -172,7 +242,7 @@ class AdaptiveTimeframeBitcoinPredictor:
         df['month'] = df.index.month
         
         # Lag features for pattern recognition
-        for lag in [1, 2, 3, 5, 8, 13]:  # Fibonacci sequence for variety
+        for lag in [1, 2, 3, 5, 8, 13]:
             df[f'returns_lag_{lag}'] = df['returns'].shift(lag)
             df[f'volume_ratio_lag_{lag}'] = df['volume_ratio'].shift(lag)
             df[f'rsi_14_lag_{lag}'] = df['rsi_14'].shift(lag)
@@ -185,16 +255,19 @@ class AdaptiveTimeframeBitcoinPredictor:
     
     def create_daily_target(self, df):
         """Create target: Will price be higher in 24 hours?"""
-        # Since we have mixed timeframes, we need to handle this carefully
         df = df.copy()
         
-        # For daily prediction, we want to know if price will be higher in 24 hours
-        # We'll use the last available price in the next 24 hours as our target
-        df['future_price_24h'] = df['close'].shift(-1)  # This is simplified
+        # For mixed timeframes, we need to be careful with the target
+        # Let's create a daily-aligned target
+        daily_prices = df['close'].resample('D').last().ffill()
         
-        # For proper daily prediction, we'd need to align to daily boundaries
-        # For now, we'll use next period's close vs current close
-        df['target'] = (df['future_price_24h'] > df['close']).astype(int)
+        # Create target: price tomorrow > price today
+        daily_prices = daily_prices.to_frame('close')
+        daily_prices['target'] = (daily_prices['close'].shift(-1) > daily_prices['close']).astype(int)
+        
+        # Merge back to original dataframe
+        df = df.merge(daily_prices[['target']], left_index=True, right_index=True, how='left')
+        df['target'] = df['target'].ffill()
         
         return df
     
@@ -263,7 +336,7 @@ class AdaptiveTimeframeBitcoinPredictor:
             precision = precision_score(y_test, y_pred, zero_division=0)
             
             accuracies.append(accuracy)
-            precuracies.append(precision)
+            precisions.append(precision)
             
             print(f"Fold {fold+1}: Accuracy = {accuracy:.3f}, Precision = {precision:.3f}")
         
@@ -290,7 +363,7 @@ class AdaptiveTimeframeBitcoinPredictor:
             
             # Group features by type for analysis
             technical_features = [f for f in importance_df['feature'] 
-                                if any(x in f for x in ['rsi', 'sma', 'ema', 'volatility', 'bb'])]
+                                if any(x in f for x in ['rsi', 'sma', 'ema', 'volatility'])]
             volume_features = [f for f in importance_df['feature'] if 'volume' in f]
             price_features = [f for f in importance_df['feature'] 
                             if any(x in f for x in ['returns', 'price', 'range'])]
@@ -306,9 +379,14 @@ class AdaptiveTimeframeBitcoinPredictor:
             print("Model not trained yet. Call train() first.")
             return None
         
-        # Get latest data
-        latest_data = self.fetch_binance_ohlcv(interval='1m', limit=100)
-        if latest_data is None:
+        # Get latest data (enough for feature calculation)
+        print("Fetching latest data for prediction...")
+        latest_data = self.fetch_binance_ohlcv_chunked(
+            interval='1h',
+            start_time=self.calculate_start_time(30)  # Get 30 days for feature calc
+        )
+        
+        if latest_data is None or len(latest_data) == 0:
             print("Could not fetch latest data")
             return None
         
@@ -316,14 +394,16 @@ class AdaptiveTimeframeBitcoinPredictor:
         latest_with_features = self.create_advanced_features(latest_data)
         
         # Use the most recent complete data point
-        latest_complete = latest_with_features.dropna().iloc[-1:]
+        latest_complete = latest_with_features.dropna()
         
         if len(latest_complete) == 0:
             print("No complete data point for prediction")
             return None
         
+        latest_point = latest_complete.iloc[-1:]
+        
         # Prepare features for prediction
-        X_latest = latest_complete[self.feature_columns]
+        X_latest = latest_point[self.feature_columns]
         X_latest_scaled = self.scaler.transform(X_latest)
         
         # Make prediction
@@ -334,11 +414,13 @@ class AdaptiveTimeframeBitcoinPredictor:
         print(f"Prediction: {'UP 📈' if prediction == 1 else 'DOWN 📉'}")
         print(f"Probability of UP movement: {probability:.3f}")
         print(f"Confidence: {'HIGH' if probability > 0.7 else 'MEDIUM' if probability > 0.6 else 'LOW'}")
+        print(f"Based on data up to: {latest_point.index[0]}")
         
         return {
             'prediction': prediction,
             'probability': probability,
-            'timestamp': latest_complete.index[0]
+            'timestamp': latest_point.index[0],
+            'current_price': latest_point['close'].iloc[0]
         }
 
 # Usage example
@@ -355,9 +437,7 @@ def main():
     prediction = predictor.predict_next_day()
     
     if prediction:
-        current_price = predictor.fetch_binance_ohlcv(interval='1m', limit=1)
-        if current_price is not None:
-            print(f"Current BTC Price: ${current_price['close'].iloc[-1]:.2f}")
+        print(f"Current BTC Price: ${prediction['current_price']:.2f}")
 
 if __name__ == "__main__":
     main()
