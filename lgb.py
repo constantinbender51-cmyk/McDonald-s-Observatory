@@ -12,7 +12,7 @@ warnings.filterwarnings('ignore')
 # Custom print function with delay
 def delayed_print(message):
     print(message, flush=True)
-    time.sleep(0.1)
+    time.sleep(0.51)
 
 # Download data from Google Drive
 delayed_print("Downloading data from Google Drive...")
@@ -170,9 +170,9 @@ delayed_print(f"  Completed: {lag_counter}/{total_lags} lags created!")
 
 delayed_print(f"\nTotal features after lagging: {df.shape[1]}")
 
-# 12. Create target variable (1440 candles ahead = 1 day)
-delayed_print("\n12. Creating target variable...")
-df['future_return'] = (df['close'].shift(-1440) - df['close']) / df['close'] * 100
+# 12. Create target variable (240 candles ahead = 4 hours - more realistic for minute data)
+delayed_print("\n12. Creating target variable (predicting 4 hours ahead)...")
+df['future_return'] = (df['close'].shift(-240) - df['close']) / df['close'] * 100
 
 # Find optimal threshold for balanced classes
 delayed_print("\n13. Finding optimal threshold for balanced class distribution...")
@@ -207,13 +207,13 @@ delayed_print(df['target'].value_counts().to_string())
 delayed_print("\n14. Cleaning data...")
 delayed_print(f"Rows before cleaning: {len(df)}")
 
-# Drop first 20,160 rows (longest lag = 2 weeks) and last 1,440 rows (target forward look)
+# Drop first 20,160 rows (longest lag = 2 weeks) and last 240 rows (target forward look = 4 hours)
 # This removes all rows that would have NaN values without using dropna()
 rows_to_drop_start = 20160
-rows_to_drop_end = 1440
+rows_to_drop_end = 240
 
 delayed_print(f"Removing first {rows_to_drop_start} rows (longest lag period)...")
-delayed_print(f"Removing last {rows_to_drop_end} rows (target forward look)...")
+delayed_print(f"Removing last {rows_to_drop_end} rows (target forward look = 4 hours)...")
 
 df = df.iloc[rows_to_drop_start:-rows_to_drop_end].reset_index(drop=True)
 
