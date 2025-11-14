@@ -95,7 +95,8 @@ class ModelBundle:
         feats = self._build_features(df).iloc[[-1]]
         Xz = (feats - self.mu) / self.sigma
         Xb = np.c_[np.ones(Xz.shape[0]), Xz]
-        return float(Xb @ self.theta)
+        result = Xb @ self.theta
+        return float(result.item())  # ← Use .item() instead of float()
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Return feature matrix (no NaNs)."""
