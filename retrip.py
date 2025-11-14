@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
+import time
 
 # Assuming binance_ohlc module exists with get_ohlc function
 try:
@@ -370,6 +371,7 @@ class Backtest:
         log.info(f"Max Drawdown:           {max_drawdown:.2f}%")
         log.info(f"Sharpe Ratio:           {sharpe:.2f}")
         log.info("")
+        time.sleep(1)
         
         # Visualize equity curve using logging
         log.info("=" * 60)
