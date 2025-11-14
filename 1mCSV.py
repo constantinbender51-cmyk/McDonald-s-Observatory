@@ -17,21 +17,29 @@ fetching_status = {
     'current_date': '',
     'error': None,
     'dataframe': None,
-    'completion_time': None
+    'completion_time': None,
+    'is_test_mode': False
 }
 
-def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01'):
+def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01', test_mode=False):
     """
     Fetch OHLCV data from Binance API
     """
     global fetching_status
     
-    # Use current time dynamically for end date
-    end_date = datetime.now().strftime('%Y-%m-%d')
+    if test_mode:
+        # For test mode, fetch only last 30 days
+        end_date = datetime.now()
+        start_date = (end_date - timedelta(days=30)).strftime('%Y-%m-%d')
+        end_ts = int(end_date.timestamp() * 1000)
+        print(f"Test mode: Fetching data from {start_date} to {end_date.strftime('%Y-%m-%d')}")
+    else:
+        # Use current time dynamically for end date
+        end_date = datetime.now()
+        end_ts = int(end_date.timestamp() * 1000)
     
-    # Convert dates to timestamps
+    # Convert start date to timestamp
     start_ts = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp() * 1000)
-    end_ts = int(datetime.now().timestamp() * 1000)  # Current timestamp
     
     base_url = 'https://api.binance.com/api/v3/klines'
     all_data = []
@@ -45,8 +53,9 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01')
     fetching_status['error'] = None
     fetching_status['current_date'] = start_date
     fetching_status['completion_time'] = None
+    fetching_status['is_test_mode'] = test_mode
     
-    print("Starting Bitcoin data fetch from Binance...")
+    print(f"Starting Bitcoin data fetch from Binance... {'(TEST MODE - 1 month)' if test_mode else ''}")
     
     try:
         while current_ts < end_ts and fetching_status['is_fetching']:
@@ -78,6 +87,11 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01')
             
             # Small delay to be respectful to the API
             time.sleep(0.1)
+            
+            # For test mode, break early if we have enough data (approx 1 month)
+            if test_mode and len(all_data) >= 43200:  # 30 days * 24 hours * 60 minutes = 43200
+                print("Test mode: Reached approximately 1 month of data, stopping...")
+                break
         
         if fetching_status['is_fetching']:  # Only process if not cancelled
             # Convert to DataFrame
@@ -114,10 +128,10 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01')
     finally:
         fetching_status['is_fetching'] = False
 
-def start_fetching_thread():
+def start_fetching_thread(test_mode=False):
     """Start the data fetching in a separate thread"""
     if not fetching_status['is_fetching']:
-        thread = threading.Thread(target=fetch_binance_data)
+        thread = threading.Thread(target=fetch_binance_data, kwargs={'test_mode': test_mode})
         thread.daemon = True
         thread.start()
         return True
@@ -172,7 +186,14 @@ def index():
             .fetch-btn:hover {
                 background: #218838;
             }
-            .fetch-btn:disabled {
+            .test-btn {
+                background: #ffc107;
+                color: #212529;
+            }
+            .test-btn:hover {
+                background: #e0a800;
+            }
+            .btn:disabled {
                 background: #6c757d;
                 cursor: not-allowed;
             }
@@ -227,6 +248,23 @@ def index():
                 color: #6c757d;
                 margin-top: 10px;
             }
+            .mode-indicator {
+                padding: 5px 10px;
+                border-radius: 15px;
+                font-size: 12px;
+                font-weight: bold;
+                margin-left: 10px;
+            }
+            .test-mode {
+                background: #fff3cd;
+                color: #856404;
+                border: 1px solid #ffeaa7;
+            }
+            .full-mode {
+                background: #d1ecf1;
+                color: #0c5460;
+                border: 1px solid #bee5eb;
+            }
         </style>
     </head>
     <body>
@@ -237,16 +275,23 @@ def index():
                 <h3>Dataset Information:</h3>
                 <p><strong>Symbol:</strong> BTC/USDT</p>
                 <p><strong>Timeframe:</strong> 1 Minute</p>
-                <p><strong>Date Range:</strong> 2018-01-01 to Current Time</p>
-                <p><strong>Expected Data:</strong> ~3+ million records (this may take several minutes)</p>
+                <p><strong>Full Dataset Range:</strong> 2018-01-01 to Current Time</p>
+                <p><strong>Test Dataset Range:</strong> Last 30 days only</p>
+                <p><strong>Expected Full Data:</strong> ~3+ million records (may take several minutes)</p>
+                <p><strong>Expected Test Data:</strong> ~43,200 records (quick download)</p>
             </div>
 
-            <button id="fetchBtn" class="btn fetch-btn" onclick="startFetching()">
-                🚀 Fetch 1 Minute Binance OHLCV Data
-            </button>
+            <div style="margin: 20px 0;">
+                <button id="fetchBtn" class="btn fetch-btn" onclick="startFetching(false)">
+                    🚀 Fetch Full Historical Data
+                </button>
+                <button id="testBtn" class="btn test-btn" onclick="startFetching(true)">
+                    🧪 Test Download (Last 30 Days)
+                </button>
+            </div>
 
             <div id="progressContainer" class="progress-container">
-                <h3>Fetching Data...</h3>
+                <h3>Fetching Data... <span id="modeIndicator" class="mode-indicator"></span></h3>
                 <div class="progress-bar">
                     <div id="progressFill" class="progress-fill"></div>
                 </div>
@@ -261,7 +306,7 @@ def index():
             <div id="errorContainer" class="error" style="display: none;"></div>
 
             <div id="successContainer" class="success" style="display: none;">
-                <h3>✅ Data Fetching Complete!</h3>
+                <h3>✅ Data Fetching Complete! <span id="completionMode" class="mode-indicator"></span></h3>
                 <p id="completionText"></p>
                 <p><strong>Completion Time:</strong> <span id="completionTime"></span></p>
                 <a id="downloadLink" href="/download" class="btn download-btn">
@@ -280,29 +325,46 @@ def index():
             let visibilityHandler;
             let lastProgressState = {};
             
-            function startFetching() {
-                const btn = document.getElementById('fetchBtn');
-                btn.disabled = true;
-                btn.textContent = 'Starting...';
+            function startFetching(testMode) {
+                const fetchBtn = document.getElementById('fetchBtn');
+                const testBtn = document.getElementById('testBtn');
                 
-                fetch('/start-fetch', { method: 'POST' })
+                fetchBtn.disabled = true;
+                testBtn.disabled = true;
+                
+                if (testMode) {
+                    fetchBtn.textContent = 'Waiting...';
+                    testBtn.textContent = 'Starting Test...';
+                } else {
+                    fetchBtn.textContent = 'Starting...';
+                    testBtn.textContent = 'Waiting...';
+                }
+                
+                const endpoint = testMode ? '/start-test-fetch' : '/start-fetch';
+                
+                fetch(endpoint, { method: 'POST' })
                     .then(response => response.json())
                     .then(data => {
                         if (data.success) {
-                            showProgress();
+                            showProgress(testMode);
                             startProgressUpdate();
                             setupVisibilityHandler();
                         } else {
                             showError('Already fetching data or error starting process');
-                            btn.disabled = false;
-                            btn.textContent = '🚀 Fetch 1 Minute Binance OHLCV Data';
+                            resetButtons();
                         }
                     })
                     .catch(error => {
                         showError('Error starting fetch: ' + error);
-                        btn.disabled = false;
-                        btn.textContent = '🚀 Fetch 1 Minute Binance OHLCV Data';
+                        resetButtons();
                     });
+            }
+            
+            function resetButtons() {
+                document.getElementById('fetchBtn').disabled = false;
+                document.getElementById('testBtn').disabled = false;
+                document.getElementById('fetchBtn').textContent = '🚀 Fetch Full Historical Data';
+                document.getElementById('testBtn').textContent = '🧪 Test Download (Last 30 Days)';
             }
             
             function cancelFetching() {
@@ -311,14 +373,22 @@ def index():
                     .then(data => {
                         if (data.success) {
                             hideProgress();
-                            document.getElementById('fetchBtn').disabled = false;
-                            document.getElementById('fetchBtn').textContent = '🚀 Fetch 1 Minute Binance OHLCV Data';
+                            resetButtons();
                             cleanupVisibilityHandler();
                         }
                     });
             }
             
-            function showProgress() {
+            function showProgress(testMode) {
+                const modeIndicator = document.getElementById('modeIndicator');
+                if (testMode) {
+                    modeIndicator.textContent = 'TEST MODE';
+                    modeIndicator.className = 'mode-indicator test-mode';
+                } else {
+                    modeIndicator.textContent = 'FULL MODE';
+                    modeIndicator.className = 'mode-indicator full-mode';
+                }
+                
                 document.getElementById('progressContainer').style.display = 'block';
                 document.getElementById('successContainer').style.display = 'none';
                 document.getElementById('errorContainer').style.display = 'none';
@@ -329,14 +399,23 @@ def index():
                 document.getElementById('progressContainer').style.display = 'none';
             }
             
-            function showSuccess(records, completionTime) {
+            function showSuccess(records, completionTime, isTestMode) {
+                const completionMode = document.getElementById('completionMode');
+                if (isTestMode) {
+                    completionMode.textContent = 'TEST DATA';
+                    completionMode.className = 'mode-indicator test-mode';
+                } else {
+                    completionMode.textContent = 'FULL DATA';
+                    completionMode.className = 'mode-indicator full-mode';
+                }
+                
                 document.getElementById('progressContainer').style.display = 'none';
                 document.getElementById('successContainer').style.display = 'block';
                 document.getElementById('completionText').textContent = 
                     `Successfully fetched ${records.toLocaleString()} records of Bitcoin OHLCV data.`;
                 document.getElementById('completionTime').textContent = completionTime;
-                document.getElementById('fetchBtn').disabled = false;
-                document.getElementById('fetchBtn').textContent = '🚀 Fetch Again';
+                
+                resetButtons();
                 
                 // Show preview
                 fetch('/api/data')
@@ -399,13 +478,12 @@ def index():
                         if (!data.is_fetching && data.total_records > 0) {
                             // Fetching completed
                             clearInterval(progressInterval);
-                            showSuccess(data.total_records, data.completion_time || 'Unknown');
+                            showSuccess(data.total_records, data.completion_time || 'Unknown', data.is_test_mode);
                         } else if (!data.is_fetching && data.error) {
                             // Error occurred
                             clearInterval(progressInterval);
                             showError('Fetching error: ' + data.error);
-                            document.getElementById('fetchBtn').disabled = false;
-                            document.getElementById('fetchBtn').textContent = '🚀 Fetch 1 Minute Binance OHLCV Data';
+                            resetButtons();
                         } else if (data.is_fetching || force || stateChanged) {
                             // Still fetching or force update or state changed
                             const progressFill = document.getElementById('progressFill');
@@ -415,8 +493,9 @@ def index():
                             statusText.textContent = `Fetched: ${data.current_records.toLocaleString()} records`;
                             currentDate.textContent = `Current date: ${data.current_date}`;
                             
-                            // Simple progress indicator (since we don't know total in advance)
-                            const progress = Math.min((data.current_records / 3500000) * 100, 100);
+                            // Progress indicator - different max for test vs full mode
+                            const maxRecords = data.is_test_mode ? 43200 : 3500000;
+                            const progress = Math.min((data.current_records / maxRecords) * 100, 100);
                             progressFill.style.width = progress + '%';
                         }
                     })
@@ -433,12 +512,14 @@ def index():
                     .then(data => {
                         if (data.is_fetching) {
                             document.getElementById('fetchBtn').disabled = true;
+                            document.getElementById('testBtn').disabled = true;
                             document.getElementById('fetchBtn').textContent = 'Fetching in progress...';
-                            showProgress();
+                            document.getElementById('testBtn').textContent = 'Fetching in progress...';
+                            showProgress(data.is_test_mode);
                             startProgressUpdate();
                             setupVisibilityHandler();
                         } else if (data.total_records > 0) {
-                            showSuccess(data.total_records, data.completion_time || 'Unknown');
+                            showSuccess(data.total_records, data.completion_time || 'Unknown', data.is_test_mode);
                         }
                     });
             });
@@ -458,11 +539,20 @@ def index():
 
 @app.route('/start-fetch', methods=['POST'])
 def start_fetch():
-    """Start the data fetching process"""
+    """Start the full data fetching process"""
     if fetching_status['is_fetching']:
         return jsonify({'success': False, 'message': 'Already fetching data'})
     
-    success = start_fetching_thread()
+    success = start_fetching_thread(test_mode=False)
+    return jsonify({'success': success})
+
+@app.route('/start-test-fetch', methods=['POST'])
+def start_test_fetch():
+    """Start the test data fetching process (1 month)"""
+    if fetching_status['is_fetching']:
+        return jsonify({'success': False, 'message': 'Already fetching data'})
+    
+    success = start_fetching_thread(test_mode=True)
     return jsonify({'success': success})
 
 @app.route('/cancel-fetch', methods=['POST'])
@@ -502,7 +592,11 @@ def download_file():
     mem.seek(0)
     csv_buffer.close()
     
-    filename = f"bitcoin_1m_ohlcv_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    # Different filename for test vs full mode
+    if fetching_status['is_test_mode']:
+        filename = f"bitcoin_1m_ohlcv_TEST_1month_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    else:
+        filename = f"bitcoin_1m_ohlcv_FULL_historical_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     
     return send_file(
         mem,
@@ -512,6 +606,9 @@ def download_file():
     )
 
 if __name__ == '__main__':
-    print("Starting web server on http://localhost:5000")
-    print("Visit the page and click 'Fetch 1 Minute Binance OHLCV Data' to start downloading historical data")
+    print("Starting web server on http://localhost:8080")
+    print("Visit the page to fetch Bitcoin OHLCV data")
+    print("Options:")
+    print("  - 🚀 Fetch Full Historical Data: All data from 2018-01-01 to now (~3M+ records)")
+    print("  - 🧪 Test Download (Last 30 Days): Quick download of last month only (~43K records)")
     app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
