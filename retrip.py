@@ -435,11 +435,11 @@ class Backtest:
 def main():
     log.info("Loading data from Binance...")
     
-    # Fetch data
-    df = binance_ohlc.get_ohlc(SYMBOL, INTERVAL)
+    # Fetch ALL historical data using the training function
+    df = binance_ohlc.get_ohlc_for_training(symbol=SYMBOL, interval=INTERVAL)
     
-    # Filter from start date
-    df.index = pd.to_datetime(df.index)
+    # Set timestamp as index and filter from start date
+    df = df.set_index('timestamp')
     df = df[df.index >= START_DATE]
     
     if len(df) == 0:
