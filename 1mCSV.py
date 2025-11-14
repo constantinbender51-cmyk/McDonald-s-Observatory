@@ -452,4 +452,4 @@ def download_file():
 if __name__ == '__main__':
     print("Starting web server on http://localhost:5000")
     print("Visit the page and click 'Fetch 1 Minute Binance OHLCV Data' to start downloading historical data")
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
