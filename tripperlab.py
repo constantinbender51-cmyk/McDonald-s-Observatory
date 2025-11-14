@@ -12,8 +12,8 @@ import itertools
 # CONFIGURATION
 # ==========================================
 # Optimization Ranges for Brute-Force Search
-X_RANGE = [3, 5, 7, 10, 14]       # Feature lookback window (X days)
-ZETA_RANGE = [3, 7, 10, 14]      # Target prediction horizon (Zeta days)
+X_RANGE = [3, 5, 7, 10, 14, 18, 24, 30]       # Feature lookback window (X days)
+ZETA_RANGE = [3, 7, 10, 14, 18, 24, 30]      # Target prediction horizon (Zeta days)
 
 # Constants
 START_DATE = "01 Jan, 2018"
