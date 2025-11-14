@@ -11,11 +11,13 @@ import http.server
 import socketserver
 import os 
 
-# Note: Network calls will fail in this sandboxed environment, but the logic is correct.
+# Assume CCXT is installed and functional in this production environment.
 try:
     import ccxt
 except ImportError:
-    print("Warning: 'ccxt' library not found. Please install it with 'pip install ccxt' in a real environment.")
+    print("FATAL ERROR: Required library 'ccxt' not found. Please install it.")
+    raise
+
     
 # --- CORE CONFIGURATION (Based on User Requirements) ---
 SYMBOL = 'BTC/USDT'
@@ -27,22 +29,21 @@ BATCH_SIZE = 32
 LAG = 48 # Predict 2 days (48 hours) ahead
 RESULTS_FILE = 'backtest_results.json'
 HTML_FILE = 'backtest_visualization.html'
-PORT = 8080 # Standard port for simple HTTP server
-
+PORT = 8080 # Corrected Port
 # --- Data Retrieval & Model Functions ---
 
 def fetch_binance_data(symbol, timeframe, start_date):
     """
-    Attempts to fetch historical OHLCV data from Binance using CCXT.
-    Falls back to generating mock data if the API call fails or CCXT is unavailable.
+    Fetches historical OHLCV data from Binance using CCXT, starting from 2018-01-01.
+    If the API call fails, the function will return an empty DataFrame, halting the process.
     """
     print(f"Attempting to fetch real data for {symbol} ({timeframe}) starting from {start_date}...")
     
-    if 'ccxt' not in globals():
-        print("CCXT not available. Falling back to mock data.")
-        return generate_mock_data(n_rows=max(1000, WINDOW_SIZE + LAG + 100))
-
     try:
+        if 'ccxt' not in globals():
+             # This check remains as a final guard against import failure, though unlikely now.
+             raise ImportError("ccxt library is not available in environment globals.")
+             
         binance = ccxt.binance({'enableRateLimit': True})
         since_timestamp = binance.parse8601(start_date)
 
@@ -50,44 +51,36 @@ def fetch_binance_data(symbol, timeframe, start_date):
         limit = 1000 
         
         while True:
+            # Fetch 1000 candles at a time, moving forward from the last timestamp
             ohlcv = binance.fetch_ohlcv(symbol, timeframe, since_timestamp, limit=limit)
-            if not ohlcv or len(ohlcv) < 2: 
+            
+            if not ohlcv: 
+                print("No more data found.")
                 break
+                
             all_ohlcv.extend(ohlcv)
             since_timestamp = ohlcv[-1][0] + 1 
             
-            # Removed the artificial 30,000 candle limit to support real application usage.
-        
+            print(f"Fetched {len(all_ohlcv)} candles so far...")
+            
         if not all_ohlcv:
-            print(f"API call successful, but no data returned. Falling back to mock data.")
-            return generate_mock_data(n_rows=max(1000, WINDOW_SIZE + LAG + 100))
+            print(f"API call completed, but returned no data between {start_date} and current time.")
+            return pd.DataFrame()
 
         df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         
-        print(f"Successfully fetched {len(df)} candles.")
+        print(f"Successfully fetched a total of {len(df)} candles.")
         return df[['Open', 'High', 'Low', 'Close', 'Volume']]
 
     except Exception as e:
-        print(f"API call failed (expected in sandbox): {e}. Falling back to mock data.")
-        return generate_mock_data(n_rows=max(1000, WINDOW_SIZE + LAG + 100))
+        # Production-level logging of a runtime failure
+        print(f"RUNTIME ERROR: Binance API call failed during data fetch.")
+        print(f"Ensure network connectivity and API stability. Exception: {e}")
+        # Return an empty DataFrame, causing main() to exit cleanly.
+        return pd.DataFrame()
 
-
-def generate_mock_data(n_rows):
-    """Generates synthetic OHLCV data."""
-    print(f"Generating {n_rows} rows of mock data for testing...")
-    np.random.seed(42)  
-    base_price = 10000
-    price_movements = np.cumsum(np.random.normal(0, 0.5, n_rows))
-    close = base_price + price_movements + np.random.normal(0, 10, n_rows)
-    open_price = close * (1 + np.random.uniform(-0.001, 0.001, n_rows))
-    high = np.maximum(open_price, close) * (1 + np.random.uniform(0, 0.001, n_rows))
-    low = np.minimum(open_price, close) * (1 - np.random.uniform(0, 0.001, n_rows))
-    volume = np.random.randint(1000, 50000, n_rows)
-    data = {'Open': open_price, 'High': high, 'Low': low, 'Close': close, 'Volume': volume}
-    df = pd.DataFrame(data, index=pd.date_range(end=datetime.now(), periods=n_rows, freq=TIMEFRAME))
-    return df
 
 def preprocess_and_feature_engineer(df, window_size=WINDOW_SIZE, lag=LAG):
     """
@@ -253,11 +246,15 @@ def main():
     
     # 1. Data Retrieval
     df = fetch_binance_data(SYMBOL, TIMEFRAME, START_DATE)
-    if df is None or df.empty: return
+    if df is None or df.empty: 
+        print("Script aborted due to missing or failed data retrieval.")
+        return
 
     # 2. Preprocessing & Feature Engineering
     X, Y, df_aligned, scaler = preprocess_and_feature_engineer(df)
-    if X is None or len(X) == 0: return
+    if X is None or len(X) == 0: 
+        print("Script aborted because not enough clean data was available after feature engineering.")
+        return
 
     # 3. Train/Test Split
     train_size = int(len(X) * 0.8)
