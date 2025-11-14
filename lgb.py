@@ -30,10 +30,10 @@ delayed_print("\nLoading data...")
 df = pd.read_csv('1m.csv')
 delayed_print(f"Data shape: {df.shape}")
 
-# TRIM DATA FIRST - Keep only last 1 million rows to manage memory on Railway
-if len(df) > 1000000:
-    delayed_print(f"Trimming data from {len(df)} to last 1,000,000 rows to manage memory...")
-    df = df.tail(1000000).reset_index(drop=True)
+# TRIM DATA FIRST - Keep only last 500K rows for faster training (~1 year of data)
+if len(df) > 500000:
+    delayed_print(f"Trimming data from {len(df)} to last 500,000 rows for faster training...")
+    df = df.tail(500000).reset_index(drop=True)
     delayed_print(f"Data shape after trimming: {df.shape}")
 
 delayed_print(f"Columns: {df.columns.tolist()}")
