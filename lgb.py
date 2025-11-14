@@ -12,7 +12,7 @@ warnings.filterwarnings('ignore')
 # Custom print function with delay
 def delayed_print(message):
     print(message, flush=True)
-    time.sleep(0.51)
+    time.sleep(0.1)
 
 # Download data from Google Drive
 delayed_print("Downloading data from Google Drive...")
@@ -28,31 +28,43 @@ else:
 
 delayed_print("\nLoading data...")
 df = pd.read_csv('1m.csv')
-delayed_print(f"Data shape: {df.shape}")
-
-# TRIM DATA FIRST - Keep only last 500K rows for faster training (~1 year of data)
-if len(df) > 500000:
-    delayed_print(f"Trimming data from {len(df)} to last 500,000 rows for faster training...")
-    df = df.tail(500000).reset_index(drop=True)
-    delayed_print(f"Data shape after trimming: {df.shape}")
-
+delayed_print(f"Original 1-minute data shape: {df.shape}")
 delayed_print(f"Columns: {df.columns.tolist()}")
-delayed_print(df.head().to_string())
 
-# Ensure we have the right columns (assuming: timestamp, open, high, low, close, volume)
-# Adjust column names if needed
+# Ensure we have timestamp
 if 'timestamp' in df.columns:
     df['timestamp'] = pd.to_datetime(df['timestamp'])
 elif 'date' in df.columns:
     df['timestamp'] = pd.to_datetime(df['date'])
 else:
-    # Assume first column is timestamp
     df['timestamp'] = pd.to_datetime(df.iloc[:, 0])
 
 # Standardize column names
 df.columns = df.columns.str.lower()
-required_cols = ['open', 'high', 'low', 'close', 'volume']
-delayed_print(f"\nChecking for required columns: {required_cols}")
+
+# Convert 1-minute data to 1-hour data
+delayed_print("\nConverting 1-minute candles to 1-hour candles...")
+delayed_print("This will dramatically reduce data size and training time...")
+
+# Set timestamp as index for resampling
+df.set_index('timestamp', inplace=True)
+
+# Resample to hourly candles (OHLCV aggregation)
+df_hourly = df.resample('1H').agg({
+    'open': 'first',
+    'high': 'max',
+    'low': 'min',
+    'close': 'last',
+    'volume': 'sum'
+}).dropna()
+
+df_hourly.reset_index(inplace=True)
+df = df_hourly
+
+delayed_print(f"Hourly data shape: {df.shape}")
+delayed_print(f"Data now spans from {df['timestamp'].iloc[0]} to {df['timestamp'].iloc[-1]}")
+delayed_print(f"Total hours of data: {len(df)}")
+delayed_print(df.head().to_string())
 
 delayed_print("\n" + "="*80)
 delayed_print("FEATURE ENGINEERING")
@@ -170,9 +182,9 @@ delayed_print(f"  Completed: {lag_counter}/{total_lags} lags created!")
 
 delayed_print(f"\nTotal features after lagging: {df.shape[1]}")
 
-# 12. Create target variable (240 candles ahead = 4 hours - more realistic for minute data)
-delayed_print("\n12. Creating target variable (predicting 4 hours ahead)...")
-df['future_return'] = (df['close'].shift(-240) - df['close']) / df['close'] * 100
+# 12. Create target variable (24 hours ahead)
+delayed_print("\n12. Creating target variable (predicting 24 hours ahead)...")
+df['future_return'] = (df['close'].shift(-24) - df['close']) / df['close'] * 100
 
 # Find optimal threshold for balanced classes
 delayed_print("\n13. Finding optimal threshold for balanced class distribution...")
@@ -207,13 +219,13 @@ delayed_print(df['target'].value_counts().to_string())
 delayed_print("\n14. Cleaning data...")
 delayed_print(f"Rows before cleaning: {len(df)}")
 
-# Drop first 20,160 rows (longest lag = 2 weeks) and last 240 rows (target forward look = 4 hours)
+# Drop first 24 rows (longest lag = 24 hours) and last 24 rows (target forward look = 24 hours)
 # This removes all rows that would have NaN values without using dropna()
-rows_to_drop_start = 20160
-rows_to_drop_end = 240
+rows_to_drop_start = 24
+rows_to_drop_end = 24
 
-delayed_print(f"Removing first {rows_to_drop_start} rows (longest lag period)...")
-delayed_print(f"Removing last {rows_to_drop_end} rows (target forward look = 4 hours)...")
+delayed_print(f"Removing first {rows_to_drop_start} rows (24-hour lag period)...")
+delayed_print(f"Removing last {rows_to_drop_end} rows (24-hour target forward look)...")
 
 df = df.iloc[rows_to_drop_start:-rows_to_drop_end].reset_index(drop=True)
 
