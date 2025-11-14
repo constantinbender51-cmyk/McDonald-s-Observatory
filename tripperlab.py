@@ -188,7 +188,8 @@ def main():
     data, features = prepare_features(df_indicators, X_DAYS, ZETA_DAYS)
     
     print("-" * 50)
-    print(f"Running Strategy (X={X_DAYS}, ZETA={ZETA_DAYS}, Leverage={LEVERAGE:.1f}x, SL={STOP_LOSS_PCT*100:.1f}%)")
+    print(f"RUNNING OUT-OF-SAMPLE TEST (Test Set 2)")
+    print(f"Parameters: X={X_DAYS}, ZETA={ZETA_DAYS}, Leverage={LEVERAGE:.1f}x, SL={STOP_LOSS_PCT*100:.1f}%")
     print(f"Dataset size after processing: {len(data)} rows")
     print("-" * 50)
 
@@ -202,23 +203,23 @@ def main():
     split_idx_2 = int(N * 0.85)
 
     train_data = data.iloc[:split_idx_1]
-    test_data_1 = data.iloc[split_idx_1:split_idx_2]
+    # Test Set 2 is the final 15% of the data
+    test_data_2 = data.iloc[split_idx_2:]
     
     # Prepare sets for ML
     X_train = train_data[features]
     y_train = train_data['target']
-    X_test_1 = test_data_1[features]
-    # y_test_1 is not strictly needed for backtest but kept for accuracy print
-    y_test_1 = test_data_1['target'] 
+    X_test_2 = test_data_2[features]
+    y_test_2 = test_data_2['target']
     
-    print(f"Train size: {len(train_data)} | Test 1 size: {len(test_data_1)}")
+    print(f"Train size: {len(train_data)} | Test 2 size: {len(test_data_2)}")
     
     # 4. Feature Scaling (All features to [-1, 1])
-    print(f"Scaling {len(features)} features to the [-1, 1] range, based on training data...")
+    print(f"Scaling {len(features)} features to the [-1, 1] range, based *only* on training data...")
     
     all_features_scaler = CustomMinMaxScaler(-1, 1).fit(X_train)
     X_train_scaled = all_features_scaler.transform(X_train)
-    X_test_1_scaled = all_features_scaler.transform(X_test_1)
+    X_test_2_scaled = all_features_scaler.transform(X_test_2)
     
     # 5. Train Model (Max Iterations set to 10,000)
     print("\nTraining Logistic Regression...")
@@ -226,31 +227,31 @@ def main():
     model = LogisticRegression(max_iter=MAX_ITER, solver='lbfgs', random_state=42)
     model.fit(X_train_scaled, y_train)
     
-    # 6. Prediction (ONLY on Test Set 1)
-    probs_1 = model.predict_proba(X_test_1_scaled)[:, 1]
-    preds_1 = model.predict(X_test_1_scaled)
+    # 6. Prediction (ONLY on Test Set 2)
+    probs_2 = model.predict_proba(X_test_2_scaled)[:, 1]
+    preds_2 = model.predict(X_test_2_scaled)
     
     # 7. Accuracy Report
-    acc = accuracy_score(y_test_1, preds_1)
-    print(f"\n--- Prediction Accuracy on Test Set 1: {acc:.4f} ---")
+    acc = accuracy_score(y_test_2, preds_2)
+    print(f"\n--- Prediction Accuracy on Test Set 2: {acc:.4f} ---")
     
-    # 8. Capital Development Backtest (ONLY on Test Set 1)
+    # 8. Capital Development Backtest (ONLY on Test Set 2)
     capital = INITIAL_CAPITAL
     capital_history = [capital]
     
     # Combine predictions and necessary data for backtest
-    backtest_df = test_data_1[['close', 'high', 'low']].copy()
+    backtest_df = test_data_2[['close', 'high', 'low']].copy()
     # Shift high/low back by 1 day so that index i has entry price (close[i]) and exit info (high[i+1], low[i+1], close[i+1])
     backtest_df['next_close'] = backtest_df['close'].shift(-1)
     backtest_df['next_high'] = backtest_df['high'].shift(-1)
     backtest_df['next_low'] = backtest_df['low'].shift(-1)
-    backtest_df['model_prob'] = probs_1
+    backtest_df['model_prob'] = probs_2
     
     # Remove the last row which has no next day data
     backtest_df = backtest_df.iloc[:-1]
 
     # Backtest simulation
-    print("\n--- Starting Backtest Log ---")
+    print("\n--- Starting Backtest Log (Test Set 2) ---")
     
     for index, row in backtest_df.iterrows():
         entry_price = row['close']
@@ -310,7 +311,7 @@ def main():
     # 9. Visualization
     dates = backtest_df.index
     print("\n" + "-" * 45)
-    print(f"--- FINAL SUMMARY (Test Set 1) ---")
+    print(f"--- FINAL SUMMARY (Test Set 2 - Out-of-Sample) ---")
     print(f"Initial Capital:   ${INITIAL_CAPITAL:.2f}")
     print(f"Final Capital:     ${final_capital:.2f}")
     print(f"Strategy Return:   {strategy_return_percent:.2f}%")
@@ -320,16 +321,16 @@ def main():
     plt.figure(figsize=(12, 6))
     
     # Calculate Buy & Hold for comparison
-    buy_hold_data = test_data_1.copy()
+    buy_hold_data = test_data_2.copy()
     buy_hold_return = buy_hold_data['close'] / buy_hold_data['close'].iloc[0] * INITIAL_CAPITAL
     
     # Plot strategy equity (using dates aligned with the backtest results)
     plt.plot(dates[:len(capital_history)-1], capital_history[:-1], label='Strategy Equity')
     
     # Plot Buy & Hold (using original test set dates)
-    plt.plot(buy_hold_data.index, buy_hold_return, label='Buy & Hold BTC (Test Set 1)', alpha=0.5, linestyle='--')
+    plt.plot(buy_hold_data.index, buy_hold_return, label='Buy & Hold BTC (Test Set 2)', alpha=0.5, linestyle='--')
     
-    plt.title(f"Capital Development for ML Strategy (X={X_DAYS}, Z={ZETA_DAYS})")
+    plt.title(f"Capital Development for ML Strategy (X={X_DAYS}, Z={ZETA_DAYS}) on Test Set 2")
     plt.xlabel("Date")
     plt.ylabel("Capital ($)")
     plt.legend()
