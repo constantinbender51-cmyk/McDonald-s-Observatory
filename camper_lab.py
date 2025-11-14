@@ -1,277 +1,307 @@
-import numpy as np
 import pandas as pd
+import numpy as np
 import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_squared_error
-from collections import deque
-import random
-import time
+from datetime import datetime, timedelta
+# CCXT is the preferred library for fetching OHLCV data from exchanges like Binance
+# Note: Network calls will fail in this sandboxed environment, but the logic is correct.
+try:
+    import ccxt
+except ImportError:
+    print("Warning: 'ccxt' library not found. Please install it with 'pip install ccxt' in a real environment.")
 
-# --- Configuration Constants ---
-WINDOW_SIZE = 72  # Lookback window size (e.g., 72 hours)
-FORECAST_HOURS = 48  # Target look-ahead (e.g., 48 hours)
-N_LAG = 3          # Number of lookback periods for each feature
-N_FEATURES = 4     # Number of base features: Price_Change, Volume_Change, MACD_Delta, StochRSI
-HIDDEN_UNITS = 32
-EPOCHS = 20
-BATCH_SIZE = 64
-TEST_SIZE = 0.2    # 20% of data for testing
-TENSORBOARD_LOG_DIR = './logs'
+# --- Configuration ---
+SYMBOL = 'BTC/USDT'
+TIMEFRAME = '1h'
+START_DATE = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
+WINDOW_SIZE = 10  # Look-back window for features
+EPOCHS = 5
+BATCH_SIZE = 32
+LAG = 1 # Predict the return 1 step ahead (next candle)
 
-def create_model(input_shape):
-    """Defines the LSTM model architecture."""
-    model = tf.keras.models.Sequential([
-        # Shape: (WINDOW_SIZE, N_FEATURES)
-        tf.keras.layers.LSTM(HIDDEN_UNITS, return_sequences=True, input_shape=input_shape),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.LSTM(HIDDEN_UNITS // 2),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.Dense(1)
+def fetch_binance_data(symbol, timeframe, start_date):
+    """
+    Attempts to fetch historical OHLCV data from Binance using CCXT.
+    Falls back to generating mock data if the API call fails or CCXT is unavailable.
+    """
+    print(f"Attempting to fetch real data for {symbol} starting from {start_date}...")
+    
+    # Check if ccxt is available (it may be imported but still not callable in sandbox)
+    if 'ccxt' not in globals():
+        print("CCXT not available. Falling back to mock data.")
+        return generate_mock_data()
+
+    try:
+        # Initialize the exchange client
+        binance = ccxt.binance({
+            'enableRateLimit': True,
+            # In a real setup, you might need 'apiKey' and 'secret' for higher limits
+        })
+
+        # Convert human-readable date to epoch timestamp (milliseconds)
+        since_timestamp = binance.parse8601(start_date)
+
+        # Fetch data in batches (Binance limit is 1000 per call)
+        all_ohlcv = []
+        limit = 1000
+        
+        while True:
+            # fetch_ohlcv returns [timestamp, open, high, low, close, volume]
+            ohlcv = binance.fetch_ohlcv(symbol, timeframe, since_timestamp, limit=limit)
+            if not ohlcv:
+                break
+            all_ohlcv.extend(ohlcv)
+            
+            # Update the start time for the next batch
+            since_timestamp = ohlcv[-1][0] + 1  # Start from the next millisecond
+
+            # Simple rate limit control (adjust as needed for real environment)
+            # time.sleep(binance.rateLimit / 1000)
+            
+            # Stop after collecting a large sample for demonstration
+            if len(all_ohlcv) > 5000:
+                 break
+        
+        if not all_ohlcv:
+            print(f"API call successful, but no data returned for {symbol}. Falling back to mock data.")
+            return generate_mock_data()
+
+        # Convert to Pandas DataFrame
+        df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        
+        print(f"Successfully fetched {len(df)} candles.")
+        return df[['Open', 'High', 'Low', 'Close', 'Volume']]
+
+    except Exception as e:
+        # This branch is expected to run in the sandbox environment
+        print(f"API call failed (expected in sandbox): {e}. Falling back to mock data.")
+        return generate_mock_data()
+
+def generate_mock_data(n_rows=5000):
+    """Generates synthetic OHLCV data for testing the backtesting logic."""
+    np.random.seed(42)  # For reproducibility
+    
+    # Generate prices with some trend
+    base_price = 10000
+    price_movements = np.cumsum(np.random.normal(0, 0.5, n_rows))
+    close = base_price + price_movements + np.random.normal(0, 10, n_rows)
+    
+    # Generate OHLC based on close
+    open_price = close * (1 + np.random.uniform(-0.001, 0.001, n_rows))
+    high = np.maximum(open_price, close) * (1 + np.random.uniform(0, 0.001, n_rows))
+    low = np.minimum(open_price, close) * (1 - np.random.uniform(0, 0.001, n_rows))
+    volume = np.random.randint(1000, 50000, n_rows)
+    
+    data = {
+        'Open': open_price,
+        'High': high,
+        'Low': low,
+        'Close': close,
+        'Volume': volume
+    }
+    df = pd.DataFrame(data, index=pd.date_range(end=datetime.now(), periods=n_rows, freq='H'))
+    
+    # Introduce NaN and zero-volume points for robust data cleaning test
+    df.iloc[100:102, df.columns.get_loc('Volume')] = 0 
+    df.iloc[200:202, df.columns.get_loc('Close')] = np.nan
+    
+    return df.dropna()
+
+def preprocess_and_feature_engineer(df, window_size=WINDOW_SIZE, lag=LAG):
+    """
+    Cleans data, generates technical indicators, normalizes, and creates sequences.
+    """
+    print("\n--- Data Preprocessing & Feature Engineering ---")
+
+    # 1. Cleaning and Consistency Check
+    df = df.copy()
+    # Fill zero volume/price by taking the mean of previous/next non-zero value
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    df.fillna(method='ffill', inplace=True)
+    df.fillna(method='bfill', inplace=True)
+    
+    if len(df) < window_size + lag + 1:
+        print("Error: Not enough data after cleaning for feature engineering.")
+        return None, None
+        
+    print(f"Data length after cleaning: {len(df)}")
+    
+    # 2. Feature Engineering (Technical Indicators)
+    
+    # Calculate Returns (Target Variable) - Log Return
+    df['Log_Return'] = np.log(df['Close'] / df['Close'].shift(1)).shift(-lag)
+    
+    # Momentum: Relative Strength Index (RSI - 14 periods)
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    RS = gain / loss
+    df['RSI'] = 100 - (100 / (1 + RS))
+
+    # Volatility: Average True Range (ATR - 14 periods)
+    high_low = df['High'] - df['Low']
+    high_prev_close = np.abs(df['High'] - df['Close'].shift(1))
+    low_prev_close = np.abs(df['Low'] - df['Close'].shift(1))
+    tr = pd.concat([high_low, high_prev_close, low_prev_close], axis=1).max(axis=1)
+    df['ATR'] = tr.rolling(window=14).mean()
+    
+    # Trend: Simple Moving Average (SMA) Crossovers (50-period, 200-period)
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    df['SMA_200'] = df['Close'].rolling(window=200).mean()
+    df['SMA_Diff'] = df['SMA_50'] - df['SMA_200']
+    
+    # Volume Change
+    df['Volume_Change'] = df['Volume'].pct_change()
+    
+    # Finalize features and target
+    features = ['Open', 'High', 'Low', 'Close', 'Volume', 'RSI', 'ATR', 'SMA_Diff', 'Volume_Change']
+    target = 'Log_Return'
+
+    df.dropna(inplace=True) 
+    print(f"Data length after indicator calculation (ready for train/test): {len(df)}")
+
+    # 3. Normalization (MinMaxScaler is often used for LSTM inputs)
+    scalers = {}
+    
+    # We only scale the features, not the log return target
+    feature_data = df[features].values
+    
+    scalers['features'] = MinMaxScaler(feature_range=(0, 1))
+    scaled_features = scalers['features'].fit_transform(feature_data)
+
+    target_data = df[target].values
+    
+    # 4. Sequence Creation for LSTM
+    X, Y = [], []
+    for i in range(len(scaled_features) - window_size - 1):
+        # Input sequence (lookback window)
+        X.append(scaled_features[i:i + window_size])
+        # Target (the log return 'lag' steps after the sequence)
+        Y.append(target_data[i + window_size])
+
+    X, Y = np.array(X), np.array(Y)
+    print(f"Shape of X (features sequence): {X.shape}")
+    print(f"Shape of Y (target returns): {Y.shape}")
+    
+    # The 'df' used for backtesting needs to be aligned with X and Y length
+    df_aligned = df.iloc[window_size:-1]
+    
+    return X, Y, df_aligned, scalers['features']
+
+def build_model(input_shape):
+    """Creates and compiles the LSTM Neural Network model."""
+    print("\n--- Model Definition ---")
+    model = Sequential([
+        # First LSTM layer with a high number of units and return_sequences=True
+        LSTM(units=100, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        
+        # Second LSTM layer
+        LSTM(units=100, return_sequences=False),
+        Dropout(0.2),
+        
+        # Output layer (predicts a single continuous value: the log return)
+        Dense(units=1) 
     ])
+
+    # Using Adam optimizer and Mean Squared Error (MSE) loss for regression
     model.compile(optimizer='adam', loss='mse')
+    print("Model compiled with MSE loss and Adam optimizer.")
     return model
 
-def run_backtest(df, model):
+def backtest_strategy(df_aligned, predictions):
     """
-    Simulates a simple trading strategy using the trained model.
-    A simple threshold strategy is used: Buy if prediction > 0.005, Sell if prediction < -0.005.
+    Simulates a simple trading strategy: Go long if prediction > 0, short if prediction < 0.
     """
-    initial_cash = 10000.0
-    cash = initial_cash
-    position = 0.0  # Amount of crypto held
-    trades = []
+    print("\n--- Backtesting Strategy ---")
     
-    # Simple backtesting loop (for illustration only)
-    print("\n--- Running Simplified Backtest Simulation ---")
+    # 1. Create Prediction Signal (1 for Long, -1 for Short)
+    # This strategy is based on the predicted sign of the log return
+    df_aligned['Signal'] = np.where(predictions.flatten() > 0, 1, -1)
     
-    # We only backtest the test set portion
-    test_start_index = int(len(df) * (1 - TEST_SIZE))
-    test_df = df.iloc[test_start_index:].copy()
+    # 2. Calculate Strategy Returns
+    # Strategy Return = Position * Actual Next Return
+    df_aligned['Strategy_Return'] = df_aligned['Signal'] * df_aligned['Log_Return']
     
-    # To run a real backtest, you would need to re-format the test_df into X_test and y_test
-    # and use the model.predict(X_test) results. For simplicity, this placeholder simulates 
-    # the trade logic based on predicted returns (which would be loaded from a prediction step).
+    # 3. Calculate Cumulative Returns
+    # Total return if we just held the asset (Buy & Hold)
+    df_aligned['Buy_Hold_Cumulative'] = (1 + df_aligned['Log_Return']).cumprod()
     
-    # Placeholder for prediction: assuming we have predictions
-    # Note: In a real scenario, you'd use the model to generate predictions here.
-    # For this simulation, we assume 'Prediction' column exists and is scaled.
-    test_df['Prediction'] = np.random.uniform(-0.01, 0.01, len(test_df)) # Placeholder
-    
-    # Simple Trading Logic
-    for i in range(1, len(test_df) - FORECAST_HOURS):
-        row = test_df.iloc[i]
-        prediction = row['Prediction']
-        current_price = row['Close']
-        
-        # 1. Buy Logic (Go long)
-        if prediction > 0.005 and cash > 0:
-            if position == 0:
-                # Buy
-                position = cash / current_price
-                cash = 0
-                trades.append(('BUY', row.name, current_price))
-        
-        # 2. Sell Logic (Exit long position)
-        elif prediction < -0.005 and position > 0:
-            # Sell
-            cash = position * current_price
-            position = 0
-            trades.append(('SELL', row.name, current_price))
+    # Total return for the NN strategy
+    df_aligned['Strategy_Cumulative'] = (1 + df_aligned['Strategy_Return']).cumprod()
 
-    # Calculate final value
-    final_value = cash + position * test_df.iloc[-1]['Close']
+    # Metrics
+    total_market_return = df_aligned['Buy_Hold_Cumulative'].iloc[-1] - 1
+    total_strategy_return = df_aligned['Strategy_Cumulative'].iloc[-1] - 1
     
-    print(f"Initial Cash: ${initial_cash:,.2f}")
-    print(f"Final Portfolio Value: ${final_value:,.2f}")
-    print(f"Total Return: {((final_value - initial_cash) / initial_cash) * 100:.2f}%")
-    print(f"Total Trades: {len(trades)}")
+    # Calculate Annualized Volatility (assuming hourly data: 24*365 = 8760 periods/year)
+    periods_per_year = 8760
+    strategy_volatility = df_aligned['Strategy_Return'].std() * np.sqrt(periods_per_year)
+    
+    # Calculate Sharpe Ratio (assuming risk-free rate of 0 for simplicity)
+    # Sharpe Ratio = (Annualized Return - Risk-Free Rate) / Annualized Volatility
+    annualized_strategy_return = (1 + total_strategy_return) ** (periods_per_year / len(df_aligned)) - 1
+    sharpe_ratio = annualized_strategy_return / strategy_volatility if strategy_volatility != 0 else np.nan
+
+    print("-" * 40)
+    print(f"Total Market Return (Buy & Hold): {total_market_return:.2%}")
+    print(f"Total Strategy Return (NN):       {total_strategy_return:.2%}")
+    print(f"Strategy Sharpe Ratio (Annualized): {sharpe_ratio:.2f}")
     print("-" * 40)
     
-    return final_value
+    return df_aligned
 
-# --- MAIN EXECUTION BLOCK ---
-
-# Use mock data structure that matches the user's likely time series data
-# In a real environment, this would be loaded from a file or API
-data = {
-    'Open': np.random.rand(1000) * 10000,
-    'High': np.random.rand(1000) * 10000 + 100,
-    'Low': np.random.rand(1000) * 10000 - 100,
-    'Close': np.random.rand(1000) * 10000,
-    'Volume': np.random.rand(1000) * 1000000
-}
-df = pd.DataFrame(data, index=pd.date_range(start='2022-01-01', periods=1000, freq='H'))
-# Simulate a few zero volume/price events that could cause the error
-df.iloc[100, df.columns.get_loc('Volume')] = 0
-df.iloc[101, df.columns.get_loc('Volume')] = 100 # Next Volume creates Price_Change (inf)
-df.iloc[500, df.columns.get_loc('Close')] = 0
-df.iloc[501, df.columns.get_loc('Close')] = 10000 # Next Close creates Price_Change (inf)
-
-
-# --- 2. Feature Engineering ---
-
-# 2.1 Calculate Price and Volume Changes
-df['Price_Change'] = df['Close'].pct_change()
-df['Volume_Change'] = df['Volume'].pct_change()
-
-# 2.2 Calculate Technical Indicators (simplified)
-# MACD: Placeholder for simplicity, using a basic difference
-df['EMA_12'] = df['Close'].ewm(span=12, adjust=False).mean()
-df['EMA_26'] = df['Close'].ewm(span=26, adjust=False).mean()
-df['MACD'] = df['EMA_12'] - df['EMA_26']
-df['Signal_Line'] = df['MACD'].ewm(span=9, adjust=False).mean()
-df['MACD_Delta'] = df['MACD'] - df['Signal_Line']
-
-# Stochastic RSI (simplified to just a ratio)
-df['StochRSI'] = (df['Close'] - df['Close'].min()) / (df['Close'].max() - df['Close'].min())
-
-# 2.3 Define the Target Variable
-# Target: Direction and magnitude of the price change over the next 48 hours
-# Price return = (Close[t+48] - Close[t]) / Close[t]
-# Use .shift(-FORECAST_HOURS) to align the future return with the current feature set
-df['Target'] = df['Close'].pct_change(FORECAST_HOURS).shift(-FORECAST_HOURS)
-
-
-### CRITICAL DEBUGGING STEP: IDENTIFYING INFINITE VALUES ###
-# As requested, we check for positive or negative infinity (inf/-inf).
-# These typically arise from division by zero (e.g., pct_change when the previous value was 0).
-print("\n" + "="*70)
-print("### DATA QUALITY CHECK: IDENTIFYING INFINITE VALUES (INF) ###")
-print("="*70)
-
-# Columns to check for non-finite values (inf, -inf)
-cols_to_check = ['Price_Change', 'Volume_Change', 'MACD_Delta', 'StochRSI', 'Target']
-inf_found = False
-
-for col in cols_to_check:
-    inf_mask = np.isinf(df[col])
-    inf_count = inf_mask.sum()
+def main():
+    """Main execution function."""
     
-    if inf_count > 0:
-        inf_found = True
-        print(f"🚨 [{col}]: {inf_count} infinite value(s) found.")
-        
-        # Get the first 5 timestamps where inf occurred
-        inf_indices = df.loc[inf_mask].index.tolist()
-        print(f"  First 5 timestamps: {inf_indices[:5]}")
-        
-        # Print a few rows that contain the inf value and the preceding row for context
-        print("\n  Sample Context (The zero value in the 'Preceding' row is the likely culprit):")
-        
-        for i in range(min(5, len(inf_indices))):
-            idx = df.index.get_loc(inf_indices[i])
-            # Determine the column that should have been non-zero in the preceding step
-            culprit_col = 'Close'
-            if col == 'Volume_Change':
-                culprit_col = 'Volume'
-            elif col == 'Price_Change' or col == 'Target':
-                culprit_col = 'Close'
-                
-            # Get the current row and the row immediately preceding it for context
-            context_df = df.iloc[idx-1 : idx+1]
-            
-            # Print the culprit column (Close/Volume) and the feature column (col)
-            # The 'culprit_col' value in the top row of the printout should be near zero.
-            print(f"  Feature Check Column: '{col}' (Inf found in the bottom row)")
-            print(context_df[[culprit_col, col]].to_string(header=True))
-            print("-" * 30)
-
-if not inf_found:
-    print("✅ No infinite (inf) values found in the target columns. You may proceed.")
-
-print("="*70 + "\n")
-
-
-### DATA CLEANING STEP: CONVERT INF TO NAN ###
-# Replace all positive and negative infinite values with NaN. 
-# This ensures that the subsequent df.dropna() command removes these problematic rows.
-df.replace([np.inf, -np.inf], np.nan, inplace=True)
-print("ℹ️ Replaced all infinite values (inf, -inf) with NaN for safe removal via dropna().")
-
-
-# --- 3. Create Input Matrix (X) and Target Vector (y) ---
-
-# Drop initial NaN rows created by indicators, shift operations, and potentially the inf/huge value replacements
-# NOTE: The rows containing 'inf' values are now dropped here.
-df = df.dropna()
-
-# Select the four base features for the 72-hour lag window
-base_features = ['Price_Change', 'Volume_Change', 'MACD_Delta', 'StochRSI']
-X_data = []
-y_data = []
-
-# Create the sequence data for the LSTM
-for i in range(WINDOW_SIZE * N_LAG, len(df)):
-    # Slice the relevant rows (72 hours of data)
-    # The current window is from i - (WINDOW_SIZE * N_LAG) to i
-    start_index = i - WINDOW_SIZE
-    if start_index < 0:
-        continue
+    # 1. Data Retrieval (attempts real data, falls back to mock data)
+    df = fetch_binance_data(SYMBOL, TIMEFRAME, START_DATE)
     
-    # X input contains the last WINDOW_SIZE rows (72 hours) for the base features
-    X_window = df[base_features].iloc[start_index:i].values
-    
-    # y target is the Target value at the end of that window
-    y_target = df['Target'].iloc[i]
+    if df is None or df.empty:
+        print("Exiting: Failed to load data.")
+        return
 
-    X_data.append(X_window)
-    y_data.append(y_target)
+    # 2. Preprocessing & Feature Engineering
+    X, Y, df_aligned, scaler = preprocess_and_feature_engineer(df)
+    
+    if X is None:
+        return
 
-X = np.array(X_data)
-y = np.array(y_data)
+    # 3. Train/Test Split (80% train, 20% test - simulating walk-forward for demonstration)
+    train_size = int(len(X) * 0.8)
+    X_train, X_test = X[:train_size], X[train_size:]
+    Y_train, Y_test = Y[:train_size], Y[train_size:]
+    
+    df_test = df_aligned.iloc[train_size:]
 
-# Ensure data is not empty
-if X.size == 0:
-    print("Error: Dataset is empty after feature engineering and dropping NaNs.")
-    # Exiting function for mock data
-else:
-    # --- 4. Scale Data ---
-    # Reshape X for scaling (temporarily flatten to 2D)
-    original_shape = X.shape # (N_samples, WINDOW_SIZE, N_FEATURES)
-    X_reshaped = X.reshape(-1, original_shape[2]) # (N_samples * WINDOW_SIZE, N_FEATURES)
+    # 4. Model Definition and Training
+    model = build_model(input_shape=(X_train.shape[1], X_train.shape[2]))
     
-    scaler_X = MinMaxScaler(feature_range=(0, 1))
-    X_scaled_reshaped = scaler_X.fit_transform(X_reshaped)
+    print("\n--- Model Training ---")
+    history = model.fit(
+        X_train, Y_train,
+        epochs=EPOCHS,
+        batch_size=BATCH_SIZE,
+        verbose=1,
+        shuffle=False # Crucial for time series data
+    )
     
-    # Reshape back to 3D
-    X_scaled = X_scaled_reshaped.reshape(original_shape)
-    
-    # Scale y (Target)
-    scaler_y = MinMaxScaler(feature_range=(0, 1))
-    y_scaled = scaler_y.fit_transform(y.reshape(-1, 1))
+    print(f"Training completed. Final Loss: {history.history['loss'][-1]:.6f}")
 
-    # --- 5. Split Data (Training and Testing) ---
-    split_index = int(len(X_scaled) * (1 - TEST_SIZE))
-    X_train, X_test = X_scaled[:split_index], X_scaled[split_index:]
-    y_train, y_test = y_scaled[:split_index], y_scaled[split_index:]
+    # 5. Prediction
+    test_predictions = model.predict(X_test)
+    
+    # 6. Backtesting and Evaluation
+    backtest_results = backtest_strategy(df_test, test_predictions)
+    
+    print("\nFinal backtest results are available in the 'backtest_results' DataFrame (not displayed here).")
+    print("Check the 'Strategy_Cumulative' column to evaluate performance against the 'Buy_Hold_Cumulative'.")
 
-    # --- 6. Train Model ---
-    model = create_model(input_shape=(WINDOW_SIZE, N_FEATURES))
-    
-    print("Starting Model Training...")
-    # Add TensorBoard callback for monitoring
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir=TENSORBOARD_LOG_DIR, histogram_freq=1)
-    
-    # Train the model
-    model.fit(X_train, y_train, epochs=EPOCHS, batch_size=BATCH_SIZE, validation_split=0.1, verbose=0, callbacks=[tensorboard_callback])
-    print("Model Training Complete.")
-
-    # --- 7. Evaluate and Backtest ---
-    
-    # Predict on the test set
-    y_pred_scaled = model.predict(X_test)
-    
-    # Inverse transform to get actual return values
-    y_test_actual = scaler_y.inverse_transform(y_test)
-    y_pred_actual = scaler_y.inverse_transform(y_pred_scaled)
-    
-    # Calculate Mean Squared Error (MSE)
-    mse = mean_squared_error(y_test_actual, y_pred_actual)
-    print(f"\nTest Set MSE (Actual Returns): {mse:.6f}")
-    
-    # Run simple backtest simulation
-    # Note: To run the backtest, we need to add the actual 'Close' prices for the test period back to the test_df
-    # In a real scenario, this step requires careful data re-alignment, which is abstracted here.
-    run_backtest(df, model)
-
-# --- END MAIN EXECUTION BLOCK ---
+if __name__ == '__main__':
+    # Set logging level for TensorFlow to suppress warnings
+    tf.get_logger().setLevel('ERROR')
+    main()
