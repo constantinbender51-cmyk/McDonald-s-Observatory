@@ -7,17 +7,12 @@ import warnings
 import gdown
 import os
 import time
-import sys
-
 warnings.filterwarnings('ignore')
 
-# Delayed print function to prevent output scrambling
-def delayed_print(*args, delay=0.01, **kwargs):
-    """Print with a small delay to prevent output scrambling"""
-    message = ' '.join(str(arg) for arg in args)
-    print(message, **kwargs)
-    sys.stdout.flush()  # Ensure immediate output
-    time.sleep(delay)
+# Custom print function with delay
+def delayed_print(message):
+    print(message, flush=True)
+    time.sleep(0.1)
 
 # Download data from Google Drive
 delayed_print("Downloading data from Google Drive...")
@@ -35,7 +30,7 @@ delayed_print("\nLoading data...")
 df = pd.read_csv('1m.csv')
 delayed_print(f"Data shape: {df.shape}")
 delayed_print(f"Columns: {df.columns.tolist()}")
-delayed_print(df.head())
+delayed_print(df.head().to_string())
 
 # Ensure we have the right columns (assuming: timestamp, open, high, low, close, volume)
 # Adjust column names if needed
@@ -132,35 +127,39 @@ indicator_cols = ['log_return', 'ma_7', 'ma_14', 'ma_21', 'ma_50', 'ma_200',
                   'ma_ratio_20_50', 'ma_ratio_50_200', 'macd_minus_signal',
                   'rsi', 'stoch_rsi', 'atr', 'obv', 'vwap']
 
-# 11. Create lagged features with structured time intervals
-delayed_print("\n11. Creating lagged features with structured time intervals...")
-delayed_print("This may take a few minutes...")
+# 11. Create lagged features with structured time intervals (OPTIMIZED for memory)
+delayed_print("\n11. Creating lagged features with optimized time intervals...")
+delayed_print("Using minimal lag set to manage memory on Railway...")
 
-# Generate lag positions:
-# - 1 hour of minute data: 60 lags (1, 2, 3, ..., 60)
-# - 24 hours of hourly data: 24 lags (60, 120, 180, ..., 1440)
-# - 7 days of daily data: 7 lags (1440, 2880, 4320, 5760, 7200, 8640, 10080)
-# - 1 year of weekly data: 52 lags (10080, 20160, 30240, ..., 524160)
+# OPTIMIZED lag positions - only 11 lags total:
+# Recent: 5, 15, 30 minutes (3 lags)
+# Hourly: 60, 240, 720 minutes = 1h, 4h, 12h (3 lags)
+# Daily: 1440, 4320, 7200 minutes = 1d, 3d, 5d (3 lags)
+# Weekly: 10080, 20160 minutes = 1w, 2w (2 lags)
 
-minute_lags = list(range(1, 61))  # 1 to 60 minutes
-hourly_lags = [60 * i for i in range(1, 25)]  # 60, 120, ..., 1440 (24 hours)
-daily_lags = [1440 * i for i in range(1, 8)]  # 1440, 2880, ..., 10080 (7 days)
-weekly_lags = [10080 * i for i in range(1, 53)]  # 10080, 20160, ..., 524160 (52 weeks)
-
-lag_positions = minute_lags + hourly_lags + daily_lags + weekly_lags
+lag_positions = [5, 15, 30, 60, 240, 720, 1440, 4320, 7200, 10080, 20160]
 
 delayed_print(f"Number of lag positions: {len(lag_positions)}")
-delayed_print(f"Minute lags (first 10): {minute_lags[:10]}")
-delayed_print(f"Hourly lags (first 5): {hourly_lags[:5]}")
-delayed_print(f"Daily lags (all 7): {daily_lags}")
-delayed_print(f"Weekly lags (first 5): {weekly_lags[:5]}")
-delayed_print(f"Weekly lags (last 5): {weekly_lags[-5:]}")
+delayed_print(f"Lag structure:")
+delayed_print(f"  Recent (minutes): 5, 15, 30")
+delayed_print(f"  Hourly: 60 (1h), 240 (4h), 720 (12h)")
+delayed_print(f"  Daily: 1440 (1d), 4320 (3d), 7200 (5d)")
+delayed_print(f"  Weekly: 10080 (1w), 20160 (2w)")
 
-# Create lagged features
+# Create lagged features with progress tracking
+total_lags = len(indicator_cols) * len(lag_positions)
+lag_counter = 0
+
+delayed_print(f"\nCreating {total_lags} lagged features...")
 for col in indicator_cols:
     if col in df.columns:
         for lag in lag_positions:
             df[f'{col}_lag_{lag}'] = df[col].shift(lag)
+            lag_counter += 1
+            if lag_counter % 20 == 0:  # Progress update every 20 lags
+                delayed_print(f"  Progress: {lag_counter}/{total_lags} lags created...")
+
+delayed_print(f"  Completed: {lag_counter}/{total_lags} lags created!")
 
 delayed_print(f"\nTotal features after lagging: {df.shape[1]}")
 
@@ -193,9 +192,9 @@ df['target'] = pd.cut(df['future_return'],
                       labels=[0, 1, 2])  # 0=Down, 1=Sideways, 2=Up
 
 delayed_print("\nClass distribution:")
-delayed_print(df['target'].value_counts(normalize=True))
+delayed_print(df['target'].value_counts(normalize=True).to_string())
 delayed_print("\nClass counts:")
-delayed_print(df['target'].value_counts())
+delayed_print(df['target'].value_counts().to_string())
 
 # Drop rows with NaN values
 delayed_print("\n14. Cleaning data...")
@@ -241,29 +240,29 @@ params = {
 train_data = lgb.Dataset(X_train, label=y_train)
 test_data = lgb.Dataset(X_test, label=y_test, reference=train_data)
 
-delayed_print("\nTraining model...")
+print("\nTraining model...")
 model = lgb.train(params,
                   train_data,
                   num_boost_round=200,
                   valid_sets=[train_data, test_data],
                   valid_names=['train', 'valid'])
 
-delayed_print("\n" + "="*80)
-delayed_print("MODEL EVALUATION")
-delayed_print("="*80)
+print("\n" + "="*80)
+print("MODEL EVALUATION")
+print("="*80)
 
 # Predictions
 y_pred = model.predict(X_test)
 y_pred_class = np.argmax(y_pred, axis=1)
 
 # Confusion Matrix
-delayed_print("\nConfusion Matrix:")
+print("\nConfusion Matrix:")
 cm = confusion_matrix(y_test, y_pred_class)
-delayed_print(cm)
+print(cm)
 
 # Classification Report
-delayed_print("\nClassification Report:")
-delayed_print(classification_report(y_test, y_pred_class, 
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred_class, 
                           target_names=['Down', 'Sideways', 'Up']))
 
 # Metrics
@@ -271,32 +270,32 @@ f1 = f1_score(y_test, y_pred_class, average='macro')
 precision = precision_score(y_test, y_pred_class, average='macro')
 recall = recall_score(y_test, y_pred_class, average='macro')
 
-delayed_print(f"\nMacro F1 Score: {f1:.4f}")
-delayed_print(f"Macro Precision: {precision:.4f}")
-delayed_print(f"Macro Recall: {recall:.4f}")
+print(f"\nMacro F1 Score: {f1:.4f}")
+print(f"Macro Precision: {precision:.4f}")
+print(f"Macro Recall: {recall:.4f}")
 
 # Print confusion matrix in a formatted way
-delayed_print("\nConfusion Matrix (formatted):")
-delayed_print("                Predicted")
-delayed_print("              Down  Sideways  Up")
-delayed_print(f"Actual Down    {cm[0,0]:6d}  {cm[0,1]:8d}  {cm[0,2]:4d}")
-delayed_print(f"     Sideways  {cm[1,0]:6d}  {cm[1,1]:8d}  {cm[1,2]:4d}")
-delayed_print(f"     Up        {cm[2,0]:6d}  {cm[2,1]:8d}  {cm[2,2]:4d}")
+print("\nConfusion Matrix (formatted):")
+print("                Predicted")
+print("              Down  Sideways  Up")
+print(f"Actual Down    {cm[0,0]:6d}  {cm[0,1]:8d}  {cm[0,2]:4d}")
+print(f"     Sideways  {cm[1,0]:6d}  {cm[1,1]:8d}  {cm[1,2]:4d}")
+print(f"     Up        {cm[2,0]:6d}  {cm[2,1]:8d}  {cm[2,2]:4d}")
 
 # Feature importance
-delayed_print("\n" + "="*80)
-delayed_print("TOP 20 FEATURE IMPORTANCES")
-delayed_print("="*80)
+print("\n" + "="*80)
+print("TOP 20 FEATURE IMPORTANCES")
+print("="*80)
 feature_importance = pd.DataFrame({
     'feature': feature_cols,
     'importance': model.feature_importance(importance_type='gain')
 }).sort_values('importance', ascending=False)
 
-delayed_print(feature_importance.head(20).to_string())
+print(feature_importance.head(20).to_string())
 
-delayed_print("\n" + "="*80)
-delayed_print("BACKTESTING")
-delayed_print("="*80)
+print("\n" + "="*80)
+print("BACKTESTING")
+print("="*80)
 
 # Backtesting
 initial_capital = 10000
@@ -308,9 +307,9 @@ trade_log = []
 test_df = df.iloc[split_idx:].copy()
 test_df['predicted'] = y_pred_class
 
-delayed_print(f"\nInitial Capital: ${initial_capital:,.2f}")
-delayed_print(f"Backtesting period: {test_df['timestamp'].iloc[0]} to {test_df['timestamp'].iloc[-1]}")
-delayed_print(f"Number of predictions: {len(test_df)}")
+print(f"\nInitial Capital: ${initial_capital:,.2f}")
+print(f"Backtesting period: {test_df['timestamp'].iloc[0]} to {test_df['timestamp'].iloc[-1]}")
+print(f"Number of predictions: {len(test_df)}")
 
 for idx in range(len(test_df) - 1440):  # -1440 to ensure we can look ahead
     current_prediction = test_df['predicted'].iloc[idx]
@@ -352,18 +351,18 @@ if position != 0:
 final_capital = capital
 total_return = (final_capital - initial_capital) / initial_capital * 100
 
-delayed_print(f"\nFinal Capital: ${final_capital:,.2f}")
-delayed_print(f"Total Return: {total_return:.2f}%")
-delayed_print(f"Profit/Loss: ${final_capital - initial_capital:,.2f}")
+print(f"\nFinal Capital: ${final_capital:,.2f}")
+print(f"Total Return: {total_return:.2f}%")
+print(f"Profit/Loss: ${final_capital - initial_capital:,.2f}")
 
 # Buy and hold comparison
 buy_hold_return = (test_df['close'].iloc[-1] - test_df['close'].iloc[0]) / test_df['close'].iloc[0] * 100
 buy_hold_capital = initial_capital * (1 + buy_hold_return / 100)
 
-delayed_print(f"\nBuy & Hold Return: {buy_hold_return:.2f}%")
-delayed_print(f"Buy & Hold Final Capital: ${buy_hold_capital:,.2f}")
-delayed_print(f"\nStrategy vs Buy & Hold: {total_return - buy_hold_return:.2f}% {'outperformance' if total_return > buy_hold_return else 'underperformance'}")
+print(f"\nBuy & Hold Return: {buy_hold_return:.2f}%")
+print(f"Buy & Hold Final Capital: ${buy_hold_capital:,.2f}")
+print(f"\nStrategy vs Buy & Hold: {total_return - buy_hold_return:.2f}% {'outperformance' if total_return > buy_hold_return else 'underperformance'}")
 
-delayed_print("\n" + "="*80)
-delayed_print("BACKTEST COMPLETE")
-delayed_print("="*80)
+print("\n" + "="*80)
+print("BACKTEST COMPLETE")
+print("="*80)
