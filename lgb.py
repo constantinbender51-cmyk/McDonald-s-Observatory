@@ -2,13 +2,25 @@ import pandas as pd
 import numpy as np
 import lightgbm as lgb
 from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score, classification_report
-import matplotlib.pyplot as plt
-import seaborn as sns
 from datetime import datetime
 import warnings
+import gdown
+import os
 warnings.filterwarnings('ignore')
 
-print("Loading data...")
+# Download data from Google Drive
+print("Downloading data from Google Drive...")
+file_id = "1kDCl_29nXyW1mLNUAS-nsJe0O2pOuO6o"
+url = f"https://drive.google.com/uc?id={file_id}"
+output = "1m.csv"
+
+if not os.path.exists(output):
+    gdown.download(url, output, quiet=False)
+    print("Download complete!")
+else:
+    print("File already exists, skipping download.")
+
+print("\nLoading data...")
 df = pd.read_csv('1m.csv')
 print(f"Data shape: {df.shape}")
 print(f"Columns: {df.columns.tolist()}")
@@ -238,17 +250,13 @@ print(f"\nMacro F1 Score: {f1:.4f}")
 print(f"Macro Precision: {precision:.4f}")
 print(f"Macro Recall: {recall:.4f}")
 
-# Plot confusion matrix
-plt.figure(figsize=(10, 8))
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-            xticklabels=['Down', 'Sideways', 'Up'],
-            yticklabels=['Down', 'Sideways', 'Up'])
-plt.title('Confusion Matrix')
-plt.ylabel('True Label')
-plt.xlabel('Predicted Label')
-plt.tight_layout()
-plt.savefig('confusion_matrix.png', dpi=300, bbox_inches='tight')
-print("\nConfusion matrix saved as 'confusion_matrix.png'")
+# Print confusion matrix in a formatted way
+print("\nConfusion Matrix (formatted):")
+print("                Predicted")
+print("              Down  Sideways  Up")
+print(f"Actual Down    {cm[0,0]:6d}  {cm[0,1]:8d}  {cm[0,2]:4d}")
+print(f"     Sideways  {cm[1,0]:6d}  {cm[1,1]:8d}  {cm[1,2]:4d}")
+print(f"     Up        {cm[2,0]:6d}  {cm[2,1]:8d}  {cm[2,2]:4d}")
 
 # Feature importance
 print("\n" + "="*80)
@@ -259,16 +267,7 @@ feature_importance = pd.DataFrame({
     'importance': model.feature_importance(importance_type='gain')
 }).sort_values('importance', ascending=False)
 
-print(feature_importance.head(20))
-
-# Plot feature importance
-plt.figure(figsize=(12, 8))
-feature_importance.head(20).plot(x='feature', y='importance', kind='barh')
-plt.title('Top 20 Feature Importances')
-plt.xlabel('Importance')
-plt.tight_layout()
-plt.savefig('feature_importance.png', dpi=300, bbox_inches='tight')
-print("\nFeature importance plot saved as 'feature_importance.png'")
+print(feature_importance.head(20).to_string())
 
 print("\n" + "="*80)
 print("BACKTESTING")
