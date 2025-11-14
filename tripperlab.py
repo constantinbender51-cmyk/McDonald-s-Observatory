@@ -6,12 +6,16 @@ from sklearn.metrics import accuracy_score, classification_report
 import matplotlib.pyplot as plt
 import time
 from datetime import datetime
+import itertools
 
 # ==========================================
 # CONFIGURATION
 # ==========================================
-X_DAYS = 7            # Number of past days to use as features
-ZETA_DAYS = 7         # Target horizon: Predict price direction ZETA days from now
+# Optimization Ranges for Brute-Force Search
+X_RANGE = [3, 5, 7, 10, 14]       # Feature lookback window (X days)
+ZETA_RANGE = [3, 7, 10, 14]      # Target prediction horizon (Zeta days)
+
+# Constants
 START_DATE = "01 Jan, 2018"
 SYMBOL = "BTCUSDT"
 INITIAL_CAPITAL = 10000
@@ -35,7 +39,6 @@ class CustomMinMaxScaler:
     def transform(self, X):
         """Applies the transformation using fitted min/max."""
         # Check for zero range to avoid division by zero
-        # Add a small epsilon to data_min and data_max for robustness
         epsilon = 1e-7
         
         # Min-Max formula: (X - min) / (max - min)
@@ -52,14 +55,12 @@ def get_binance_data(symbol, start_date):
     """Fetches daily klines from Binance starting from start_date."""
     base_url = "https://api.binance.com/api/v3/klines"
     
-    # Convert start_date to milliseconds timestamp
     dt_obj = datetime.strptime(start_date, "%d %b, %Y")
     start_ts = int(dt_obj.timestamp() * 1000)
     
     klines = []
     print(f"Fetching data for {symbol} from {start_date}...")
     
-    # Binance limit is 1000 candles per request
     while True:
         params = {
             'symbol': symbol,
@@ -70,6 +71,7 @@ def get_binance_data(symbol, start_date):
         
         try:
             response = requests.get(base_url, params=params)
+            response.raise_for_status() # Raise HTTPError for bad responses
             data = response.json()
             
             if not data or len(data) == 0:
@@ -77,18 +79,15 @@ def get_binance_data(symbol, start_date):
                 
             klines.extend(data)
             
-            # Update start_ts to the timestamp of the last kline + 1 day
-            # 86400000 ms = 1 day
             last_kline_time = data[-1][0]
             start_ts = last_kline_time + 86400000
             
-            # Rate limit guard
             time.sleep(0.1)
             
             if last_kline_time >= int(time.time() * 1000):
                 break
                 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             print(f"Error fetching data: {e}")
             break
             
@@ -101,7 +100,6 @@ def get_binance_data(symbol, start_date):
         'taker_buy_base', 'taker_buy_quote', 'ignore'
     ])
     
-    # Type conversion
     numeric_cols = ['open', 'high', 'low', 'close', 'volume']
     df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, axis=1)
     df['date'] = pd.to_datetime(df['open_time'], unit='ms')
@@ -131,7 +129,6 @@ def calculate_indicators(df):
     
     min_rsi = rsi.rolling(window=14).min()
     max_rsi = rsi.rolling(window=14).max()
-    # Handle the max_rsi - min_rsi == 0 case (Stoch RSI is bounded 0 to 1)
     df['stoch_rsi'] = (rsi - min_rsi) / (max_rsi - min_rsi).replace(0, 1e-7)
     
     # 3. Price Change (Simple Percentage Change)
@@ -140,13 +137,13 @@ def calculate_indicators(df):
     # 4. Volume Change (Simple Percentage Change)
     df['volume_change'] = df['volume'].pct_change()
     
-    # Drop NaNs created by rolling windows
     df.dropna(inplace=True)
     return df
 
 def prepare_features(df, x_days, zeta_days):
     """
     Creates feature columns for X days of history and the Target.
+    Requires df to already contain the indicators.
     """
     data = df.copy()
     feature_cols = []
@@ -155,7 +152,6 @@ def prepare_features(df, x_days, zeta_days):
     for i in range(x_days):
         for metric in ['macd_diff', 'stoch_rsi', 'price_change', 'volume_change']:
             col_name = f'{metric}_lag_{i}'
-            # Shift data back i days to represent history
             data[col_name] = data[metric].shift(i)
             feature_cols.append(col_name)
             
@@ -163,7 +159,6 @@ def prepare_features(df, x_days, zeta_days):
     data['future_close'] = data['close'].shift(-zeta_days)
     data['target'] = (data['future_close'] > data['close']).astype(int)
     
-    # Drop NaNs created by lagging features and shifting target
     data.dropna(inplace=True)
     
     return data, feature_cols
@@ -176,121 +171,160 @@ def calculate_position_size(probability):
     conviction = (probability - 0.5) * 2
     return conviction
 
-# --- MAIN EXECUTION ---
+def evaluate_model(df_indicators, x_days, zeta_days):
+    """
+    Runs the full ML pipeline and backtest for a specific (X, Zeta) pair.
+    """
+    try:
+        data, features = prepare_features(df_indicators, x_days, zeta_days)
+
+        if len(data) < 100: # Ensure minimum data points for splitting
+            return 0.0, 0.0, 0.0
+
+        # --- 4. Train / Test Split (70% Train, 15% Test1, 15% Test2) ---
+        N = len(data)
+        split_idx_1 = int(N * 0.70)
+        split_idx_2 = int(N * 0.85)
+
+        train_data = data.iloc[:split_idx_1]
+        test_data_1 = data.iloc[split_idx_1:split_idx_2]
+        # test_data_2 is created but not used for performance tracking
+        test_data_2 = data.iloc[split_idx_2:] 
+        
+        # Prepare sets for ML
+        X_train = train_data[features]
+        y_train = train_data['target']
+        X_test_1 = test_data_1[features]
+        y_test_1 = test_data_1['target']
+        
+        # --- 5. Feature Scaling (All features to [-1, 1]) ---
+        all_features_scaler = CustomMinMaxScaler(-1, 1).fit(X_train)
+        
+        # Transform all sets
+        X_train_scaled = all_features_scaler.transform(X_train)
+        X_test_1_scaled = all_features_scaler.transform(X_test_1)
+        
+        # --- 6. Train Model ---
+        model = LogisticRegression(max_iter=10000, solver='lbfgs', random_state=42)
+        model.fit(X_train_scaled, y_train)
+        
+        # --- 7. Prediction (Test Set 1) ---
+        probs_1 = model.predict_proba(X_test_1_scaled)[:, 1]
+        preds_1 = model.predict(X_test_1_scaled)
+        
+        # Metrics
+        acc = accuracy_score(y_test_1, preds_1)
+        
+        # --- 8. Capital Development Backtest (Test Set 1) ---
+        capital = INITIAL_CAPITAL
+        
+        closes = test_data_1['close'].values
+        model_probs = probs_1
+        capital_history = [capital]
+        
+        for i in range(len(test_data_1) - 1):
+            current_price = closes[i]
+            next_price = closes[i+1]
+            prob = model_probs[i]
+            
+            position_size = calculate_position_size(prob)
+            market_return = (next_price - current_price) / current_price
+            
+            daily_pnl = capital * position_size * market_return
+            
+            capital += daily_pnl
+            capital_history.append(capital)
+
+        final_capital = capital_history[-1]
+        strategy_return_percent = ((final_capital - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100
+        
+        return strategy_return_percent, acc, capital_history, test_data_1.index
+
+    except Exception as e:
+        print(f"Error evaluating X={x_days}, ZETA={zeta_days}: {e}")
+        return -100.0, 0.0, [], [] # Return a penalty for failed runs
+
+
+# --- MAIN EXECUTION FOR OPTIMIZATION ---
 
 def main():
-    # 1. Fetch Data
+    # 1. Initial Data Fetch (Run once)
     df = get_binance_data(SYMBOL, START_DATE)
+    df_indicators = calculate_indicators(df)
     
-    # 2. Calculate Base Indicators
-    df = calculate_indicators(df)
-    
-    # 3. Prepare Features (X Days) and Target (Zeta Days)
-    data, features = prepare_features(df, X_DAYS, ZETA_DAYS)
-    
-    print(f"Dataset size after processing: {len(data)} rows")
-    print(f"Number of features: {len(features)}")
-    
-    # 4. Train / Test Split (70% Train, 15% Test1, 15% Test2)
-    N = len(data)
-    split_idx_1 = int(N * 0.70)
-    split_idx_2 = int(N * 0.85)
+    print("-" * 50)
+    print("Starting Brute-Force Optimization (Grid Search)")
+    print(f"X range: {X_RANGE} | ZETA range: {ZETA_RANGE}")
+    print("-" * 50)
 
-    train_data = data.iloc[:split_idx_1]
-    test_data_1 = data.iloc[split_idx_1:split_idx_2]
-    test_data_2 = data.iloc[split_idx_2:] # The second test set (unused for final output)
+    # 2. Optimization Loop Setup
+    results = []
+    best_return = -np.inf
+    best_params = None
+    best_equity = None
+    best_dates = None
     
-    # Use Test Set 1 for model evaluation and backtest
-    X_train = train_data[features]
-    y_train = train_data['target']
-    
-    X_test_1 = test_data_1[features]
-    y_test_1 = test_data_1['target']
-    
-    X_test_2 = test_data_2[features]
-    y_test_2 = test_data_2['target']
-    
-    print(f"Train size: {len(train_data)} | Test 1 size: {len(test_data_1)} | Test 2 size: {len(test_data_2)}")
-    
-    # --- 5. Feature Scaling (All features to [-1, 1]) ---
-    print(f"Scaling all {len(features)} features to the [-1, 1] range, based on training data...")
-    
-    # Initialize and fit the scaler ONLY on the training data
-    all_features_scaler = CustomMinMaxScaler(-1, 1).fit(X_train[features])
-    
-    # Transform all three sets using the fitted scaler
-    X_train[features] = all_features_scaler.transform(X_train[features])
-    X_test_1[features] = all_features_scaler.transform(X_test_1[features])
-    X_test_2[features] = all_features_scaler.transform(X_test_2[features]) # Scaling Test 2 as well
-    
-    # 6. Train Model (Max Iterations set to 10,000)
-    print("\nTraining Logistic Regression with Max Iterations 10,000...")
-    
-    model = LogisticRegression(max_iter=10000, solver='lbfgs')
-    model.fit(X_train, y_train)
-    
-    # 7. Prediction (ONLY on Test Set 1)
-    # We use prob_class_1 (Probability of Price Going UP)
-    probs_1 = model.predict_proba(X_test_1)[:, 1]
-    preds_1 = model.predict(X_test_1)
-    
-    # Accuracy Report
-    acc = accuracy_score(y_test_1, preds_1)
-    print(f"\n--- Results on Test Set 1 (15% of data) ---")
-    print(f"Prediction Accuracy on Test Data 1: {acc:.4f}")
-    print("\nClassification Report (Test Set 1):")
-    print(classification_report(y_test_1, preds_1))
-    
-    # 8. Capital Development Backtest (ONLY on Test Set 1)
-    capital = INITIAL_CAPITAL
-    capital_history = [capital]
-    
-    test_data_1 = test_data_1.copy()
-    test_data_1['model_prob'] = probs_1
-    
-    closes = test_data_1['close'].values
-    dates = test_data_1.index
-    model_probs = test_data_1['model_prob'].values
-    
-    for i in range(len(test_data_1) - 1):
-        current_price = closes[i]
-        next_price = closes[i+1]
-        prob = model_probs[i]
+    total_runs = len(X_RANGE) * len(ZETA_RANGE)
+    run_count = 0
+
+    for x, zeta in itertools.product(X_RANGE, ZETA_RANGE):
+        run_count += 1
+        print(f"Running {run_count}/{total_runs}: X={x} | ZETA={zeta}...", end='\r')
         
-        # Calculate conviction/position size (-1.0 to 1.0)
-        position_size = calculate_position_size(prob)
+        ret, acc, equity_history, dates = evaluate_model(df_indicators, x, zeta)
         
-        # Calculate daily market return (simple percentage change)
-        market_return = (next_price - current_price) / current_price
+        # Store results
+        results.append({
+            'X': x,
+            'ZETA': zeta,
+            'Accuracy': acc,
+            'Return (%)': ret
+        })
         
-        # Strategy PnL: Capital * Position Size * Market Return
-        daily_pnl = capital * position_size * market_return
-        
-        capital += daily_pnl
-        capital_history.append(capital)
-        
-    # 9. Visualization
-    final_capital = capital_history[-1]
-    print("-" * 30)
-    print(f"--- Strategy Performance (Test Set 1) ---")
-    print(f"Initial Capital: ${INITIAL_CAPITAL:.2f}")
-    print(f"Final Capital:   ${final_capital:.2f}")
-    print(f"Strategy Return: {((final_capital - INITIAL_CAPITAL)/INITIAL_CAPITAL)*100:.2f}%")
-    print("-" * 30)
+        # Check for best result based on Return
+        if ret > best_return:
+            best_return = ret
+            best_params = (x, zeta)
+            best_equity = equity_history
+            best_dates = dates
+            
+    print("\n" + "=" * 50)
+    print("Optimization Complete")
+    print("=" * 50)
     
-    plt.figure(figsize=(12, 6))
-    plt.plot(dates[:len(capital_history)], capital_history, label='Strategy Equity (Test Set 1)')
+    # 3. Print Results Table
+    results_df = pd.DataFrame(results).sort_values(by='Return (%)', ascending=False)
     
-    # Add a Buy & Hold comparison for context (only on the Test Set 1 period)
-    buy_hold_return = test_data_1['close'] / test_data_1['close'].iloc[0] * INITIAL_CAPITAL
-    plt.plot(test_data_1.index, buy_hold_return, label='Buy & Hold BTC (Test Set 1)', alpha=0.5, linestyle='--')
+    print("\nTop 5 Parameter Combinations (Ranked by Test Set 1 Return):")
+    print(results_df.head())
     
-    plt.title(f"Capital Development (Logistic Regression Backtest on Test Set 1)\nX={X_DAYS}, Target={ZETA_DAYS} Days Ahead")
-    plt.xlabel("Date")
-    plt.ylabel("Capital ($)")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.show()
+    # 4. Final Output and Plot
+    if best_params:
+        best_x, best_zeta = best_params
+        
+        print("\n" + "=" * 50)
+        print(f"OPTIMAL PARAMETERS (Maximized Return on Test Set 1):")
+        print(f"X_DAYS (Feature Lookback): {best_x}")
+        print(f"ZETA_DAYS (Prediction Horizon): {best_zeta}")
+        print(f"Achieved Return: {best_return:.2f}%")
+        print("=" * 50)
+        
+        # Plot the optimal strategy's equity curve
+        plt.figure(figsize=(12, 6))
+        
+        # Calculate Buy & Hold for comparison
+        buy_hold_data = df_indicators.loc[best_dates.min():best_dates.max()]
+        buy_hold_return = buy_hold_data['close'] / buy_hold_data['close'].iloc[0] * INITIAL_CAPITAL
+        
+        plt.plot(best_dates[:len(best_equity)], best_equity, label=f'Optimal Strategy Equity (X={best_x}, Z={best_zeta})')
+        plt.plot(buy_hold_data.index, buy_hold_return, label='Buy & Hold BTC (Test Set 1)', alpha=0.5, linestyle='--')
+        
+        plt.title(f"Optimal Capital Development on Test Set 1 (X={best_x}, Z={best_zeta})")
+        plt.xlabel("Date")
+        plt.ylabel("Capital ($)")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()
 
 if __name__ == "__main__":
     main()
