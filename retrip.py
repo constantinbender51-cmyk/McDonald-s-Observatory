@@ -40,7 +40,7 @@ class DelayedLogger(logging.Logger):
     """Logger that adds delay after each log to prevent Railway log scrambling."""
     def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False):
         super()._log(level, msg, args, exc_info, extra, stack_info)
-        time.sleep(0.1)  # Delay after each log output
+        time.sleep(0.01)  # Delay after each log output
 
 logging.setLoggerClass(DelayedLogger)
 logging.basicConfig(
