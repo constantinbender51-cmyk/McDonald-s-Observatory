@@ -3,6 +3,7 @@
 backtest_lr.py
 Backtests the linear regression trading strategy with 70/30 train/test split
 Starting from January 1, 2018, using daily close prices for stop-loss checks
+Then starts a web server to display results
 """
 
 import logging
@@ -12,6 +13,9 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import time
+import json
+from flask import Flask, render_template_string
+import threading
 
 # Assuming binance_ohlc module exists with get_ohlc function
 try:
@@ -44,6 +48,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("backtest")
 
+# Global variables for web server
+backtest_results = None
+equity_data = None
+trade_data = None
+performance_metrics = None
 
 def stoch_rsi(close: np.ndarray, rsi_period: int = 14, stoch_period: int = 14) -> np.ndarray:
     """Calculate Stochastic RSI indicator."""
@@ -96,7 +105,7 @@ class ModelBundle:
         Xz = (feats - self.mu) / self.sigma
         Xb = np.c_[np.ones(Xz.shape[0]), Xz]
         result = Xb @ self.theta
-        return float(result.item())  # ← Use .item() instead of float()
+        return float(result.item())  # Fixed: using .item() instead of float()
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Return feature matrix (no NaNs)."""
@@ -229,6 +238,7 @@ class Backtest:
             final_price = test_df.iloc[-1]["close"]
             self._close_position(final_date, final_price, "END_OF_BACKTEST")
         
+        self._prepare_web_data()
         self._print_results()
     
     def _check_stop_loss(self, date, high, low, close_price) -> bool:
@@ -342,6 +352,63 @@ class Backtest:
         
         return self.capital + unrealized_pnl
     
+    def _prepare_web_data(self):
+        """Prepare data for web display."""
+        global equity_data, trade_data, performance_metrics
+        
+        # Convert equity curve for JSON serialization
+        equity_df = pd.DataFrame(self.equity_curve)
+        equity_data = {
+            'dates': [d.strftime('%Y-%m-%d') for d in equity_df['date']],
+            'equity': [float(e) for e in equity_df['equity']],
+            'price': [float(p) for p in equity_df['price']],
+            'signals': list(equity_df['signal'])
+        }
+        
+        # Prepare trade data
+        trade_data = []
+        for i, trade in enumerate(self.trades, 1):
+            trade_data.append({
+                'id': i,
+                'side': trade.side.upper(),
+                'entry_date': trade.entry_date.strftime('%Y-%m-%d'),
+                'entry_price': float(trade.entry_price),
+                'exit_date': trade.exit_date.strftime('%Y-%m-%d') if trade.exit_date else '',
+                'exit_price': float(trade.exit_price) if trade.exit_price else 0,
+                'exit_reason': trade.exit_reason,
+                'pnl': float(trade.pnl),
+                'pnl_pct': float(trade.pnl_pct)
+            })
+        
+        # Calculate performance metrics
+        final_equity = equity_df.iloc[-1]["equity"]
+        total_return = (final_equity - INITIAL_CAPITAL) / INITIAL_CAPITAL * 100
+        
+        test_start_price = self.df.iloc[self.train_split_idx]["close"]
+        test_end_price = self.df.iloc[-1]["close"]
+        bh_return = (test_end_price - test_start_price) / test_start_price * 100
+        
+        winning_trades = [t for t in self.trades if t.pnl > 0]
+        losing_trades = [t for t in self.trades if t.pnl <= 0]
+        win_rate = len(winning_trades) / len(self.trades) * 100 if self.trades else 0
+        
+        equity_df["peak"] = equity_df["equity"].cummax()
+        equity_df["drawdown"] = (equity_df["equity"] - equity_df["peak"]) / equity_df["peak"] * 100
+        max_drawdown = equity_df["drawdown"].min()
+        
+        performance_metrics = {
+            'initial_capital': float(INITIAL_CAPITAL),
+            'final_equity': float(final_equity),
+            'total_return': float(total_return),
+            'bh_return': float(bh_return),
+            'outperformance': float(total_return - bh_return),
+            'total_trades': len(self.trades),
+            'winning_trades': len(winning_trades),
+            'losing_trades': len(losing_trades),
+            'win_rate': float(win_rate),
+            'max_drawdown': float(max_drawdown)
+        }
+    
     def _print_results(self):
         """Print backtest results and performance metrics."""
         log.info("=" * 60)
@@ -395,68 +462,237 @@ class Backtest:
         log.info(f"Sharpe Ratio:           {sharpe:.2f}")
         log.info("")
         
-        # Visualize equity curve using logging
-        log.info("=" * 60)
-        log.info("EQUITY CURVE")
-        log.info("=" * 60)
-        self._log_equity_curve(equity_df)
-        
-        # Trade log
-        log.info("=" * 60)
-        log.info("TRADE LOG")
-        log.info("=" * 60)
-        for i, trade in enumerate(self.trades, 1):
-            log.info(f"Trade #{i}: {trade.side.upper()}")
-            log.info(f"  Entry:  {trade.entry_date.date()} @ ${trade.entry_price:,.2f}")
-            log.info(f"  Exit:   {trade.exit_date.date()} @ ${trade.exit_price:,.2f}")
-            log.info(f"  Reason: {trade.exit_reason}")
-            log.info(f"  P&L:    ${trade.pnl:+,.2f} ({trade.pnl_pct:+.2f}%)")
-            log.info("")
+        log.info("Starting web server on http://0.0.0.0:8000")
+
+
+def create_app():
+    """Create and configure Flask app."""
+    app = Flask(__name__)
     
-    def _log_equity_curve(self, equity_df):
-        """Create ASCII visualization of equity curve in logs."""
-        # Sample equity curve for visualization (max 50 points)
-        sample_size = min(50, len(equity_df))
-        step = len(equity_df) // sample_size
-        sampled = equity_df.iloc[::step].copy()
-        
-        # Normalize for ASCII chart (20 rows)
-        min_eq = sampled["equity"].min()
-        max_eq = sampled["equity"].max()
-        chart_height = 20
-        
-        if max_eq == min_eq:
-            log.info("Equity remained constant")
-            return
-        
-        # Create chart
-        for row in range(chart_height, -1, -1):
-            threshold = min_eq + (max_eq - min_eq) * row / chart_height
-            line = ""
-            for val in sampled["equity"]:
-                if val >= threshold:
-                    line += "█"
-                else:
-                    line += " "
+    # HTML template with Chart.js
+    html_template = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Backtest Results - Linear Regression Strategy</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+            .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
+            .metric-card { background: #f8f9fa; padding: 15px; border-radius: 6px; border-left: 4px solid #007bff; }
+            .metric-value { font-size: 24px; font-weight: bold; color: #333; }
+            .metric-label { font-size: 14px; color: #666; margin-top: 5px; }
+            .positive { color: #28a745; }
+            .negative { color: #dc3545; }
+            .chart-container { margin: 30px 0; }
+            table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+            th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+            th { background-color: #f8f9fa; }
+            .trade-positive { background-color: #d4edda; }
+            .trade-negative { background-color: #f8d7da; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Linear Regression Trading Strategy Backtest</h1>
+            <p>Symbol: {{ symbol }} | Period: {{ start_date }} to {{ end_date }} | Initial Capital: ${{ "%.2f"|format(metrics.initial_capital) }}</p>
             
-            # Add axis labels
-            if row == chart_height:
-                log.info(f"${max_eq:>10,.0f} |{line}|")
-            elif row == 0:
-                log.info(f"${min_eq:>10,.0f} |{line}|")
-            elif row == chart_height // 2:
-                mid = (max_eq + min_eq) / 2
-                log.info(f"${mid:>10,.0f} |{line}|")
-            else:
-                log.info(f"{' '*12}|{line}|")
+            <div class="metrics">
+                <div class="metric-card">
+                    <div class="metric-value {{ 'positive' if metrics.final_equity > metrics.initial_capital else 'negative' }}">
+                        ${{ "%.2f"|format(metrics.final_equity) }}
+                    </div>
+                    <div class="metric-label">Final Equity</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value {{ 'positive' if metrics.total_return > 0 else 'negative' }}">
+                        {{ "%.2f"|format(metrics.total_return) }}%
+                    </div>
+                    <div class="metric-label">Total Return</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value {{ 'positive' if metrics.bh_return > 0 else 'negative' }}">
+                        {{ "%.2f"|format(metrics.bh_return) }}%
+                    </div>
+                    <div class="metric-label">Buy & Hold</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value {{ 'positive' if metrics.outperformance > 0 else 'negative' }}">
+                        {{ "%.2f"|format(metrics.outperformance) }}%
+                    </div>
+                    <div class="metric-label">Outperformance</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">{{ metrics.total_trades }}</div>
+                    <div class="metric-label">Total Trades</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value {{ 'positive' if metrics.win_rate > 50 else 'negative' }}">
+                        {{ "%.1f"|format(metrics.win_rate) }}%
+                    </div>
+                    <div class="metric-label">Win Rate</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value negative">
+                        {{ "%.2f"|format(metrics.max_drawdown) }}%
+                    </div>
+                    <div class="metric-label">Max Drawdown</div>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h2>Equity Curve</h2>
+                <canvas id="equityChart" height="100"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <h2>Price vs Equity</h2>
+                <canvas id="priceChart" height="100"></canvas>
+            </div>
+
+            <h2>Trade History</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Side</th>
+                        <th>Entry Date</th>
+                        <th>Entry Price</th>
+                        <th>Exit Date</th>
+                        <th>Exit Price</th>
+                        <th>P&L</th>
+                        <th>P&L %</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for trade in trades %}
+                    <tr class="{{ 'trade-positive' if trade.pnl > 0 else 'trade-negative' }}">
+                        <td>{{ trade.id }}</td>
+                        <td>{{ trade.side }}</td>
+                        <td>{{ trade.entry_date }}</td>
+                        <td>${{ "%.2f"|format(trade.entry_price) }}</td>
+                        <td>{{ trade.exit_date }}</td>
+                        <td>${{ "%.2f"|format(trade.exit_price) }}</td>
+                        <td class="{{ 'positive' if trade.pnl > 0 else 'negative' }}">${{ "%.2f"|format(trade.pnl) }}</td>
+                        <td class="{{ 'positive' if trade.pnl_pct > 0 else 'negative' }}">{{ "%.2f"|format(trade.pnl_pct) }}%</td>
+                        <td>{{ trade.exit_reason }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <script>
+            // Equity Curve Chart
+            const equityCtx = document.getElementById('equityChart').getContext('2d');
+            const equityChart = new Chart(equityCtx, {
+                type: 'line',
+                data: {
+                    labels: {{ equity_data.dates | tojson }},
+                    datasets: [{
+                        label: 'Portfolio Equity',
+                        data: {{ equity_data.equity | tojson }},
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Date' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Equity (USD)' },
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+
+            // Price vs Equity Chart
+            const priceCtx = document.getElementById('priceChart').getContext('2d');
+            const priceChart = new Chart(priceCtx, {
+                type: 'line',
+                data: {
+                    labels: {{ equity_data.dates | tojson }},
+                    datasets: [
+                        {
+                            label: 'Portfolio Equity',
+                            data: {{ equity_data.equity | tojson }},
+                            borderColor: '#007bff',
+                            backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                            fill: true,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'BTC Price',
+                            data: {{ equity_data.price | tojson }},
+                            borderColor: '#28a745',
+                            backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                            fill: true,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Date' }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: { display: true, text: 'Equity (USD)' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: { display: true, text: 'BTC Price (USD)' },
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+    
+    @app.route('/')
+    def index():
+        if equity_data is None:
+            return "Backtest not completed yet. Please wait..."
         
-        # Date axis
-        start_date = sampled.iloc[0]["date"].strftime("%Y-%m-%d")
-        end_date = sampled.iloc[-1]["date"].strftime("%Y-%m-%d")
-        log.info(f"{' '*12} {start_date}{' '*(len(line)-len(start_date)-len(end_date))}{end_date}")
+        return render_template_string(html_template,
+            symbol=SYMBOL,
+            start_date=START_DATE,
+            end_date=datetime.now().strftime('%Y-%m-%d'),
+            equity_data=equity_data,
+            trades=trade_data,
+            metrics=performance_metrics
+        )
+    
+    return app
+
+
+def start_web_server():
+    """Start the Flask web server."""
+    app = create_app()
+    port = int(os.environ.get('PORT', 8000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 
 def main():
+    import os
+    
     log.info("Loading data from Binance...")
     
     # Fetch ALL historical data using the training function
@@ -478,6 +714,10 @@ def main():
     # Run backtest
     bt = Backtest(df, train_split_idx)
     bt.run()
+    
+    # Start web server after backtest completes
+    log.info("Backtest completed. Starting web server...")
+    start_web_server()
 
 
 if __name__ == "__main__":
