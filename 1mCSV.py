@@ -16,21 +16,22 @@ fetching_status = {
     'total_records': 0,
     'current_date': '',
     'error': None,
-    'dataframe': None
+    'dataframe': None,
+    'completion_time': None
 }
 
-def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01', end_date=None):
+def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01'):
     """
     Fetch OHLCV data from Binance API
     """
     global fetching_status
     
-    if end_date is None:
-        end_date = datetime.now().strftime('%Y-%m-%d')
+    # Use current time dynamically for end date
+    end_date = datetime.now().strftime('%Y-%m-%d')
     
     # Convert dates to timestamps
     start_ts = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp() * 1000)
-    end_ts = int(datetime.strptime(end_date, '%Y-%m-%d').timestamp() * 1000)
+    end_ts = int(datetime.now().timestamp() * 1000)  # Current timestamp
     
     base_url = 'https://api.binance.com/api/v3/klines'
     all_data = []
@@ -43,6 +44,7 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
     fetching_status['total_records'] = 0
     fetching_status['error'] = None
     fetching_status['current_date'] = start_date
+    fetching_status['completion_time'] = None
     
     print("Starting Bitcoin data fetch from Binance...")
     
@@ -97,11 +99,12 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
             for col in numeric_cols:
                 df[col] = pd.to_numeric(df[col])
             
-            # Filter data to the specified end date
-            df = df[df['datetime'] <= pd.to_datetime(end_date)]
+            # Filter data to current time
+            df = df[df['datetime'] <= datetime.now()]
             
             fetching_status['dataframe'] = df
             fetching_status['total_records'] = len(df)
+            fetching_status['completion_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             print(f"Data fetch complete. Total records: {len(df)}")
             
     except Exception as e:
@@ -219,6 +222,11 @@ def index():
                 border-radius: 5px;
                 margin: 10px 0;
             }
+            .last-update {
+                font-size: 12px;
+                color: #6c757d;
+                margin-top: 10px;
+            }
         </style>
     </head>
     <body>
@@ -229,7 +237,7 @@ def index():
                 <h3>Dataset Information:</h3>
                 <p><strong>Symbol:</strong> BTC/USDT</p>
                 <p><strong>Timeframe:</strong> 1 Minute</p>
-                <p><strong>Date Range:</strong> 2018-01-01 to Today</p>
+                <p><strong>Date Range:</strong> 2018-01-01 to Current Time</p>
                 <p><strong>Expected Data:</strong> ~3+ million records (this may take several minutes)</p>
             </div>
 
@@ -244,6 +252,7 @@ def index():
                 </div>
                 <div id="statusText" class="status-text">Initializing...</div>
                 <div id="currentDate" class="status-text"></div>
+                <div id="lastUpdate" class="last-update">Last update: <span id="updateTime">-</span></div>
                 <button id="cancelBtn" class="btn" style="background: #dc3545; color: white;" onclick="cancelFetching()">
                     ❌ Cancel Fetching
                 </button>
@@ -254,6 +263,7 @@ def index():
             <div id="successContainer" class="success" style="display: none;">
                 <h3>✅ Data Fetching Complete!</h3>
                 <p id="completionText"></p>
+                <p><strong>Completion Time:</strong> <span id="completionTime"></span></p>
                 <a id="downloadLink" href="/download" class="btn download-btn">
                     📥 Download CSV File
                 </a>
@@ -267,6 +277,8 @@ def index():
 
         <script>
             let progressInterval;
+            let visibilityHandler;
+            let lastProgressState = {};
             
             function startFetching() {
                 const btn = document.getElementById('fetchBtn');
@@ -279,6 +291,7 @@ def index():
                         if (data.success) {
                             showProgress();
                             startProgressUpdate();
+                            setupVisibilityHandler();
                         } else {
                             showError('Already fetching data or error starting process');
                             btn.disabled = false;
@@ -300,6 +313,7 @@ def index():
                             hideProgress();
                             document.getElementById('fetchBtn').disabled = false;
                             document.getElementById('fetchBtn').textContent = '🚀 Fetch 1 Minute Binance OHLCV Data';
+                            cleanupVisibilityHandler();
                         }
                     });
             }
@@ -315,11 +329,12 @@ def index():
                 document.getElementById('progressContainer').style.display = 'none';
             }
             
-            function showSuccess(records) {
+            function showSuccess(records, completionTime) {
                 document.getElementById('progressContainer').style.display = 'none';
                 document.getElementById('successContainer').style.display = 'block';
                 document.getElementById('completionText').textContent = 
                     `Successfully fetched ${records.toLocaleString()} records of Bitcoin OHLCV data.`;
+                document.getElementById('completionTime').textContent = completionTime;
                 document.getElementById('fetchBtn').disabled = false;
                 document.getElementById('fetchBtn').textContent = '🚀 Fetch Again';
                 
@@ -330,33 +345,69 @@ def index():
                         document.getElementById('previewData').textContent = JSON.stringify(data, null, 2);
                         document.getElementById('preview').style.display = 'block';
                     });
+                    
+                cleanupVisibilityHandler();
             }
             
             function showError(message) {
                 document.getElementById('errorContainer').style.display = 'block';
                 document.getElementById('errorContainer').textContent = message;
+                cleanupVisibilityHandler();
+            }
+            
+            function setupVisibilityHandler() {
+                // Handle page visibility changes (tab switching, minimize, etc.)
+                visibilityHandler = function() {
+                    if (!document.hidden) {
+                        // Page became visible, force immediate update
+                        updateProgress(true);
+                    }
+                };
+                
+                document.addEventListener('visibilitychange', visibilityHandler);
+            }
+            
+            function cleanupVisibilityHandler() {
+                if (visibilityHandler) {
+                    document.removeEventListener('visibilitychange', visibilityHandler);
+                    visibilityHandler = null;
+                }
             }
             
             function startProgressUpdate() {
-                progressInterval = setInterval(updateProgress, 1000);
+                progressInterval = setInterval(() => updateProgress(), 1000);
             }
             
-            function updateProgress() {
-                fetch('/progress')
+            function updateProgress(force = false) {
+                // Use cache-busting to prevent browser caching
+                const url = '/progress?' + new Date().getTime();
+                
+                fetch(url)
                     .then(response => response.json())
                     .then(data => {
+                        const updateTime = document.getElementById('updateTime');
+                        updateTime.textContent = new Date().toLocaleTimeString();
+                        
+                        // Check if state changed significantly
+                        const stateChanged = 
+                            data.is_fetching !== lastProgressState.is_fetching ||
+                            data.current_records !== lastProgressState.current_records ||
+                            data.total_records !== lastProgressState.total_records;
+                        
+                        lastProgressState = data;
+                        
                         if (!data.is_fetching && data.total_records > 0) {
                             // Fetching completed
                             clearInterval(progressInterval);
-                            showSuccess(data.total_records);
+                            showSuccess(data.total_records, data.completion_time || 'Unknown');
                         } else if (!data.is_fetching && data.error) {
                             // Error occurred
                             clearInterval(progressInterval);
                             showError('Fetching error: ' + data.error);
                             document.getElementById('fetchBtn').disabled = false;
                             document.getElementById('fetchBtn').textContent = '🚀 Fetch 1 Minute Binance OHLCV Data';
-                        } else if (data.is_fetching) {
-                            // Still fetching
+                        } else if (data.is_fetching || force || stateChanged) {
+                            // Still fetching or force update or state changed
                             const progressFill = document.getElementById('progressFill');
                             const statusText = document.getElementById('statusText');
                             const currentDate = document.getElementById('currentDate');
@@ -365,18 +416,19 @@ def index():
                             currentDate.textContent = `Current date: ${data.current_date}`;
                             
                             // Simple progress indicator (since we don't know total in advance)
-                            const progress = Math.min((data.current_records / 3000000) * 100, 100);
+                            const progress = Math.min((data.current_records / 3500000) * 100, 100);
                             progressFill.style.width = progress + '%';
                         }
                     })
                     .catch(error => {
                         console.error('Error updating progress:', error);
+                        // Don't stop the interval on occasional errors
                     });
             }
             
             // Check initial state on page load
             window.addEventListener('load', function() {
-                fetch('/progress')
+                fetch('/progress?' + new Date().getTime())
                     .then(response => response.json())
                     .then(data => {
                         if (data.is_fetching) {
@@ -384,10 +436,19 @@ def index():
                             document.getElementById('fetchBtn').textContent = 'Fetching in progress...';
                             showProgress();
                             startProgressUpdate();
+                            setupVisibilityHandler();
                         } else if (data.total_records > 0) {
-                            showSuccess(data.total_records);
+                            showSuccess(data.total_records, data.completion_time || 'Unknown');
                         }
                     });
+            });
+            
+            // Clean up when page unloads
+            window.addEventListener('beforeunload', function() {
+                if (progressInterval) {
+                    clearInterval(progressInterval);
+                }
+                cleanupVisibilityHandler();
             });
         </script>
     </body>
@@ -414,6 +475,7 @@ def cancel_fetch():
 @app.route('/progress')
 def get_progress():
     """Get the current fetching progress"""
+    # Add cache control headers to prevent caching
     return jsonify(fetching_status)
 
 @app.route('/api/data')
@@ -452,4 +514,4 @@ def download_file():
 if __name__ == '__main__':
     print("Starting web server on http://localhost:5000")
     print("Visit the page and click 'Fetch 1 Minute Binance OHLCV Data' to start downloading historical data")
-    app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
