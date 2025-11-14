@@ -182,10 +182,17 @@ if not inf_found:
 print("="*70 + "\n")
 
 
+### DATA CLEANING STEP: CONVERT INF TO NAN ###
+# Replace all positive and negative infinite values with NaN. 
+# This ensures that the subsequent df.dropna() command removes these problematic rows.
+df.replace([np.inf, -np.inf], np.nan, inplace=True)
+print("ℹ️ Replaced all infinite values (inf, -inf) with NaN for safe removal via dropna().")
+
+
 # --- 3. Create Input Matrix (X) and Target Vector (y) ---
 
 # Drop initial NaN rows created by indicators, shift operations, and potentially the inf/huge value replacements
-# NOTE: If the diagnostic above shows inf values, they will be dropped here as well.
+# NOTE: The rows containing 'inf' values are now dropped here.
 df = df.dropna()
 
 # Select the four base features for the 72-hour lag window
