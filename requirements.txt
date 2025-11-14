@@ -10,3 +10,4 @@ matplotlib
 gunicorn
 ccxt
 python-binance
+pandas_ta
