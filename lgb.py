@@ -30,10 +30,10 @@ delayed_print("\nLoading data...")
 df = pd.read_csv('1m.csv')
 delayed_print(f"Data shape: {df.shape}")
 
-# TRIM DATA FIRST - Keep only last 2 million rows to manage memory
-if len(df) > 2000000:
-    delayed_print(f"Trimming data from {len(df)} to last 2,000,000 rows to manage memory...")
-    df = df.tail(2000000).reset_index(drop=True)
+# TRIM DATA FIRST - Keep only last 1 million rows to manage memory on Railway
+if len(df) > 1000000:
+    delayed_print(f"Trimming data from {len(df)} to last 1,000,000 rows to manage memory...")
+    df = df.tail(1000000).reset_index(drop=True)
     delayed_print(f"Data shape after trimming: {df.shape}")
 
 delayed_print(f"Columns: {df.columns.tolist()}")
@@ -203,11 +203,22 @@ delayed_print(df['target'].value_counts(normalize=True).to_string())
 delayed_print("\nClass counts:")
 delayed_print(df['target'].value_counts().to_string())
 
-# Drop rows with NaN values
+# Clean data by removing rows with NaNs (avoiding dropna() memory spike)
 delayed_print("\n14. Cleaning data...")
 delayed_print(f"Rows before cleaning: {len(df)}")
-df = df.dropna()
+
+# Drop first 20,160 rows (longest lag = 2 weeks) and last 1,440 rows (target forward look)
+# This removes all rows that would have NaN values without using dropna()
+rows_to_drop_start = 20160
+rows_to_drop_end = 1440
+
+delayed_print(f"Removing first {rows_to_drop_start} rows (longest lag period)...")
+delayed_print(f"Removing last {rows_to_drop_end} rows (target forward look)...")
+
+df = df.iloc[rows_to_drop_start:-rows_to_drop_end].reset_index(drop=True)
+
 delayed_print(f"Rows after cleaning: {len(df)}")
+delayed_print("Memory-efficient cleaning complete!")
 
 # Prepare features and target
 feature_cols = [col for col in df.columns if col not in ['timestamp', 'open', 'high', 'low', 
