@@ -983,4 +983,67 @@ def cancel_fetch():
         update_last_update_time()
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success':
+        return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
+
+@app.route('/progress')
+def get_progress():
+    """Get the current fetching progress"""
+    try:
+        # Update last update time when progress is checked
+        update_last_update_time()
+        return jsonify(fetching_status)
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/api/data')
+def api_data():
+    """Return data as JSON (first 5 records for preview)"""
+    try:
+        if fetching_status['dataframe'] is not None and not fetching_status['dataframe'].empty:
+            return fetching_status['dataframe'].head().to_json(orient='records', date_format='iso')
+        return jsonify([])
+    except Exception as e:
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
+
+@app.route('/download')
+def download_file():
+    """Download the CSV file"""
+    try:
+        if fetching_status['dataframe'] is None or fetching_status['dataframe'].empty:
+            return "No data available. Please fetch data first.", 400
+        
+        # Create a StringIO object to serve the file in memory
+        csv_buffer = io.StringIO()
+        fetching_status['dataframe'].to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)
+        
+        # Create a BytesIO object from the StringIO
+        mem = io.BytesIO()
+        mem.write(csv_buffer.getvalue().encode('utf-8'))
+        mem.seek(0)
+        csv_buffer.close()
+        
+        # Different filename for test vs full mode
+        if fetching_status['is_test_mode']:
+            filename = f"bitcoin_1m_ohlcv_TEST_1month_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        else:
+            filename = f"bitcoin_1m_ohlcv_FULL_historical_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        return send_file(
+            mem,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='text/csv'
+        )
+    except Exception as e:
+        return f"Server error: {str(e)}", 500
+
+if __name__ == '__main__':
+    print("Starting web server on http://localhost:8080")
+    print("Visit the page to fetch Bitcoin OHLCV data")
+    print("Options:")
+    print("  - 🚀 Fetch Full Historical Data: All data from 2018-01-01 to now (~3M+ records)")
+    print("  - 🧪 Test Download (Last 30 Days): Quick download of last month only (~43K records)")
+    print("  - 🔄 Page auto-updates every 5 seconds")
+    print("  - 🔧 Enhanced error handling and connection monitoring")
+    app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
