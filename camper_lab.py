@@ -99,7 +99,9 @@ def preprocess_and_feature_engineer(df, window_size=WINDOW_SIZE, lag=LAG):
         return None, None, None, None
         
     # Calculate Log Return (Target Variable)
-    df['Log_Return'] = np.log(df['Close'] / df['Close'].shift(-lag)) 
+    # --- CORRECTION: Swap numerator/denominator to ensure correct log return sign ---
+    df['Log_Return'] = np.log(df['Close'].shift(-lag) / df['Close']) 
+    # ---------------------------------------------------------------------------------
     df.dropna(subset=['Log_Return'], inplace=True)
     
     # Calculate Features (Indicators)
@@ -174,9 +176,13 @@ def backtest_strategy(df_aligned, predictions):
     
     df_aligned['Signal'] = np.where(predictions.flatten() > 0, 1, -1)
     df_aligned['Strategy_Return'] = df_aligned['Signal'] * df_aligned['Log_Return']
-    df_aligned['Buy_Hold_Cumulative'] = (1 + df_aligned['Log_Return']).cumsum().apply(np.exp)
-    df_aligned['Strategy_Cumulative'] = (1 + df_aligned['Strategy_Return']).cumsum().apply(np.exp)
 
+    # Log returns are additive. Cumulative return is exp(cumsum(log_returns)), 
+    # which starts at 1.0 (0% return).
+    df_aligned['Buy_Hold_Cumulative'] = np.exp(df_aligned['Log_Return'].cumsum())
+    df_aligned['Strategy_Cumulative'] = np.exp(df_aligned['Strategy_Return'].cumsum())
+
+    # Metrics calculation now correctly uses the cumulative series
     total_market_return = df_aligned['Buy_Hold_Cumulative'].iloc[-1] - 1
     total_strategy_return = df_aligned['Strategy_Cumulative'].iloc[-1] - 1
     
