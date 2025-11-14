@@ -6,6 +6,7 @@ import io
 import threading
 import time
 import json
+import traceback
 
 app = Flask(__name__)
 
@@ -33,52 +34,50 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
     """
     global fetching_status
     
-    if test_mode:
-        # For test mode, fetch only last 30 days
-        end_date = datetime.now()
-        start_date = (end_date - timedelta(days=30)).strftime('%Y-%m-%d')
-        end_ts = int(end_date.timestamp() * 1000)
-        print(f"Test mode: Fetching data from {start_date} to {end_date.strftime('%Y-%m-%d')}")
-    else:
-        # Use current time dynamically for end date
-        end_date = datetime.now()
-        end_ts = int(end_date.timestamp() * 1000)
-    
-    # Convert start date to timestamp
-    start_ts = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp() * 1000)
-    
-    base_url = 'https://api.binance.com/api/v3/klines'
-    all_data = []
-    
-    current_ts = start_ts
-    batch_size = 1000  # Binance allows up to 1000 records per request
-    
-    # Reset status
-    fetching_status.update({
-        'is_fetching': True,
-        'current_records': 0,
-        'total_records': 0,
-        'error': None,
-        'current_date': start_date,
-        'completion_time': None,
-        'is_test_mode': test_mode,
-        'is_complete': False
-    })
-    update_last_update_time()
-    
-    print(f"Starting Bitcoin data fetch from Binance... {'(TEST MODE - 1 month)' if test_mode else ''}")
-    print(f"Time range: {start_date} to {end_date.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Start timestamp: {start_ts}, End timestamp: {end_ts}")
-    
     try:
+        if test_mode:
+            # For test mode, fetch only last 30 days
+            end_date = datetime.now()
+            start_date = (end_date - timedelta(days=30)).strftime('%Y-%m-%d')
+            end_ts = int(end_date.timestamp() * 1000)
+            print(f"Test mode: Fetching data from {start_date} to {end_date.strftime('%Y-%m-%d')}")
+        else:
+            # Use current time dynamically for end date
+            end_date = datetime.now()
+            end_ts = int(end_date.timestamp() * 1000)
+        
+        # Convert start date to timestamp
+        start_ts = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp() * 1000)
+        
+        base_url = 'https://api.binance.com/api/v3/klines'
+        all_data = []
+        
+        current_ts = start_ts
+        batch_size = 1000  # Binance allows up to 1000 records per request
+        
+        # Reset status
+        fetching_status.update({
+            'is_fetching': True,
+            'current_records': 0,
+            'total_records': 0,
+            'error': None,
+            'current_date': start_date,
+            'completion_time': None,
+            'is_test_mode': test_mode,
+            'is_complete': False
+        })
+        update_last_update_time()
+        
+        print(f"Starting Bitcoin data fetch from Binance... {'(TEST MODE - 1 month)' if test_mode else ''}")
+        print(f"Time range: {start_date} to {end_date.strftime('%Y-%m-%d %H:%M:%S')}")
+        
         request_count = 0
         while current_ts < end_ts and fetching_status['is_fetching']:
             request_count += 1
             
             # Calculate the actual limit for this request
-            # If the remaining time is less than 1000 minutes, adjust the limit
             remaining_minutes = (end_ts - current_ts) / 60000
-            actual_limit = min(batch_size, int(remaining_minutes) + 1)  # +1 to be safe
+            actual_limit = min(batch_size, max(1, int(remaining_minutes) + 1))
             
             params = {
                 'symbol': symbol,
@@ -87,45 +86,51 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
                 'limit': actual_limit
             }
             
-            print(f"Request #{request_count}: {current_ts} to {end_ts} (limit: {actual_limit})")
+            print(f"Request #{request_count}: TS {current_ts} to {end_ts} (limit: {actual_limit})")
             
-            response = requests.get(base_url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            
-            if not data:
-                print("No more data available from API")
-                break
+            try:
+                response = requests.get(base_url, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
                 
-            print(f"Received {len(data)} candles in this batch")
-            all_data.extend(data)
-            
-            # Update progress
-            current_date = datetime.fromtimestamp(data[-1][0] / 1000).strftime('%Y-%m-%d %H:%M:%S')
-            fetching_status['current_records'] = len(all_data)
-            fetching_status['current_date'] = current_date
-            update_last_update_time()
-            
-            print(f"Fetched {len(all_data)} records up to: {current_date}")
-            print(f"Last candle timestamp: {data[-1][0]}")
-            
-            # Update timestamp for next batch (last timestamp + 1 minute)
-            current_ts = data[-1][0] + 60000
-            
-            # For test mode, break early if we have enough data (approx 1 month)
-            if test_mode and len(all_data) >= 43200:  # 30 days * 24 hours * 60 minutes = 43200
-                print("Test mode: Reached approximately 1 month of data, stopping...")
-                break
-            
-            # Check if we've reached or exceeded the end timestamp
-            if data[-1][0] >= end_ts:
-                print(f"Reached end timestamp {end_ts}, stopping...")
+                if not data:
+                    print("No more data available from API")
+                    break
+                    
+                print(f"Received {len(data)} candles in this batch")
+                all_data.extend(data)
+                
+                # Update progress
+                current_date = datetime.fromtimestamp(data[-1][0] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+                fetching_status['current_records'] = len(all_data)
+                fetching_status['current_date'] = current_date
+                update_last_update_time()
+                
+                print(f"Fetched {len(all_data)} records up to: {current_date}")
+                
+                # Update timestamp for next batch (last timestamp + 1 minute)
+                current_ts = data[-1][0] + 60000
+                
+                # For test mode, break early if we have enough data
+                if test_mode and len(all_data) >= 43200:
+                    print("Test mode: Reached approximately 1 month of data, stopping...")
+                    break
+                    
+                # Check if we've reached the end
+                if data[-1][0] >= end_ts:
+                    print(f"Reached end timestamp {end_ts}, stopping...")
+                    break
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"Request error: {e}")
+                fetching_status['error'] = f"Network error: {str(e)}"
+                update_last_update_time()
                 break
                 
             # Small delay to be respectful to the API
             time.sleep(0.1)
         
-        if fetching_status['is_fetching']:  # Only process if not cancelled
+        if fetching_status['is_fetching'] and not fetching_status['error']:  # Only process if not cancelled and no error
             print(f"Processing {len(all_data)} records into DataFrame...")
             
             if not all_data:
@@ -152,9 +157,6 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
             for col in numeric_cols:
                 df[col] = pd.to_numeric(df[col])
             
-            # Filter data to current time (safety check)
-            df = df[df['datetime'] <= datetime.now()]
-            
             # Remove any potential duplicates
             df = df.drop_duplicates(subset=['datetime'])
             
@@ -168,9 +170,8 @@ def fetch_binance_data(symbol='BTCUSDT', interval='1m', start_date='2018-01-01',
             print(f"Date range: {df['datetime'].min()} to {df['datetime'].max()}")
             
     except Exception as e:
-        fetching_status['error'] = str(e)
-        print(f"❌ Error fetching data: {e}")
-        import traceback
+        fetching_status['error'] = f"Unexpected error: {str(e)}"
+        print(f"❌ Critical error in fetch_binance_data: {e}")
         traceback.print_exc()
         update_last_update_time()
     
@@ -372,6 +373,24 @@ def index():
                 text-align: left;
                 margin: 10px 0;
                 display: none;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            .connection-status {
+                margin: 10px 0;
+                padding: 8px;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            .connection-ok {
+                background: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+            }
+            .connection-error {
+                background: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
             }
         </style>
     </head>
@@ -382,6 +401,10 @@ def index():
 
         <div class="container">
             <h1>📊 Bitcoin OHLCV Data Fetcher</h1>
+            
+            <div id="connectionStatus" class="connection-status connection-ok">
+                ✅ Server Connection: OK
+            </div>
             
             <div id="statusIndicator" class="status-indicator status-idle">
                 💤 System Ready - Page auto-updates every 5 seconds
@@ -395,7 +418,6 @@ def index():
                 <p><strong>Test Dataset Range:</strong> Last 30 days only</p>
                 <p><strong>Expected Full Data:</strong> ~3+ million records (may take several minutes)</p>
                 <p><strong>Expected Test Data:</strong> ~43,200 records (quick download)</p>
-                <p><strong>Note:</strong> Now properly handles incomplete final chunks</p>
             </div>
 
             <div style="margin: 20px 0;">
@@ -461,6 +483,8 @@ def index():
             let lastProgressState = {};
             let completionDetected = false;
             let debugEnabled = false;
+            let consecutiveErrors = 0;
+            const MAX_CONSECUTIVE_ERRORS = 3;
             
             function toggleDebug() {
                 debugEnabled = !debugEnabled;
@@ -473,6 +497,29 @@ def index():
                     const debugContent = document.getElementById('debugContent');
                     const timestamp = new Date().toLocaleTimeString();
                     debugContent.innerHTML = `[${timestamp}] ${message}<br>` + debugContent.innerHTML;
+                    
+                    // Limit debug content to last 50 lines
+                    const lines = debugContent.innerHTML.split('<br>');
+                    if (lines.length > 50) {
+                        debugContent.innerHTML = lines.slice(0, 50).join('<br>');
+                    }
+                }
+            }
+            
+            function updateConnectionStatus(isConnected, message = '') {
+                const statusElement = document.getElementById('connectionStatus');
+                if (isConnected) {
+                    statusElement.className = 'connection-status connection-ok';
+                    statusElement.innerHTML = '✅ Server Connection: OK';
+                    consecutiveErrors = 0;
+                } else {
+                    statusElement.className = 'connection-status connection-error';
+                    statusElement.innerHTML = '❌ Server Connection: ERROR - ' + message;
+                    consecutiveErrors++;
+                    
+                    if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                        showError('Lost connection to server. Please refresh the page and try again.');
+                    }
                 }
             }
             
@@ -481,7 +528,7 @@ def index():
                 // Start 5-second auto-update interval
                 autoUpdateInterval = setInterval(() => {
                     updateDisplay();
-                }, 5000); // Update every 5 seconds
+                }, 5000);
                 
                 console.log('🔄 Auto-update initialized: refreshing every 5 seconds');
                 updateDebugInfo('Auto-update initialized: refreshing every 5 seconds');
@@ -490,22 +537,41 @@ def index():
             function updateDisplay() {
                 const url = '/progress?' + new Date().getTime();
                 
-                fetch(url)
-                    .then(response => response.json())
-                    .then(data => {
-                        updateSystemStatus(data);
-                        updateSystemUpdateTime(data.last_update);
-                        
-                        // If we're not currently in an active fetch process, update the display
-                        if (!isCurrentlyFetching()) {
-                            handleStateChange(data);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Auto-update error:', error);
+                fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    // Add timeout to prevent hanging requests
+                    signal: AbortSignal.timeout(10000)
+                })
+                .then(response => {
+                    // Check if response is JSON
+                    const contentType = response.headers.get('content-type');
+                    if (!contentType || !contentType.includes('application/json')) {
+                        throw new Error(`Server returned non-JSON response: ${contentType}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    updateConnectionStatus(true);
+                    updateSystemStatus(data);
+                    updateSystemUpdateTime(data.last_update);
+                    
+                    if (!isCurrentlyFetching()) {
+                        handleStateChange(data);
+                    }
+                })
+                .catch(error => {
+                    console.error('Auto-update error:', error);
+                    updateConnectionStatus(false, error.message);
+                    updateDebugInfo('Auto-update error: ' + error.message);
+                    
+                    // Don't show error if we're not in an active fetch
+                    if (!isCurrentlyFetching()) {
                         updateSystemStatus({ error: 'Connection error' });
-                        updateDebugInfo('Auto-update error: ' + error);
-                    });
+                    }
+                });
             }
             
             function updateSystemStatus(data) {
@@ -599,8 +665,16 @@ def index():
                 
                 updateDebugInfo('Starting fetch: ' + (testMode ? 'TEST mode' : 'FULL mode'));
                 
-                fetch(endpoint, { method: 'POST' })
-                    .then(response => response.json())
+                fetch(endpoint, { 
+                    method: 'POST',
+                    signal: AbortSignal.timeout(10000)
+                })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        return response.json();
+                    })
                     .then(data => {
                         if (data.success) {
                             showProgress(testMode);
@@ -626,7 +700,10 @@ def index():
             
             function cancelFetching() {
                 updateDebugInfo('Cancelling fetch...');
-                fetch('/cancel-fetch', { method: 'POST' })
+                fetch('/cancel-fetch', { 
+                    method: 'POST',
+                    signal: AbortSignal.timeout(10000)
+                })
                     .then(response => response.json())
                     .then(data => {
                         if (data.success) {
@@ -634,6 +711,14 @@ def index():
                             resetButtons();
                             cleanupVisibilityHandler();
                         }
+                    })
+                    .catch(error => {
+                        console.error('Cancel fetch error:', error);
+                        updateDebugInfo('Cancel fetch error: ' + error);
+                        // Still reset buttons even if cancel fails
+                        hideProgress();
+                        resetButtons();
+                        cleanupVisibilityHandler();
                     });
             }
             
@@ -679,11 +764,14 @@ def index():
                 resetButtons();
                 
                 // Show preview
-                fetch('/api/data')
+                fetch('/api/data', { signal: AbortSignal.timeout(10000) })
                     .then(response => response.json())
                     .then(data => {
                         document.getElementById('previewData').textContent = JSON.stringify(data, null, 2);
                         document.getElementById('preview').style.display = 'block';
+                    })
+                    .catch(error => {
+                        console.error('Error fetching preview:', error);
                     });
                     
                 cleanupVisibilityHandler();
@@ -727,68 +815,84 @@ def index():
                 // Use cache-busting to prevent browser caching
                 const url = '/progress?' + new Date().getTime();
                 
-                fetch(url)
-                    .then(response => response.json())
-                    .then(data => {
-                        const updateTime = document.getElementById('updateTime');
-                        updateTime.textContent = new Date().toLocaleTimeString();
+                fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    'Cache-Control': 'no-cache'
+                    },
+                    signal: AbortSignal.timeout(10000)
+                })
+                .then(response => {
+                    // Check if response is JSON
+                    const contentType = response.headers.get('content-type');
+                    if (!contentType || !contentType.includes('application/json')) {
+                        throw new Error(`Server returned HTML instead of JSON. Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    updateConnectionStatus(true);
+                    const updateTime = document.getElementById('updateTime');
+                    updateTime.textContent = new Date().toLocaleTimeString();
+                    
+                    // Update system status
+                    updateSystemStatus(data);
+                    
+                    // Check if state changed significantly
+                    const stateChanged = 
+                        data.is_fetching !== lastProgressState.is_fetching ||
+                        data.current_records !== lastProgressState.current_records ||
+                        data.total_records !== lastProgressState.total_records ||
+                        data.is_complete !== lastProgressState.is_complete;
+                    
+                    lastProgressState = data;
+                    
+                    // COMPLETION DETECTION - Multiple conditions
+                    const isComplete = (
+                        data.is_complete ||
+                        (!data.is_fetching && data.total_records > 0) ||
+                        (!data.is_fetching && !data.error && data.current_records > 0)
+                    );
+                    
+                    if (isComplete && data.total_records > 0) {
+                        // Fetching completed successfully
+                        console.log('✅ Completion detected! Stopping interval and showing success');
+                        updateDebugInfo('Completion detected! Stopping progress interval');
+                        clearInterval(progressInterval);
+                        showSuccess(data.total_records, data.completion_time || new Date().toLocaleString(), data.is_test_mode);
+                    } else if (!data.is_fetching && data.error) {
+                        // Error occurred
+                        console.log('❌ Error detected:', data.error);
+                        updateDebugInfo('Error detected: ' + data.error);
+                        clearInterval(progressInterval);
+                        showError('Fetching error: ' + data.error);
+                    } else if (data.is_fetching || force || stateChanged) {
+                        // Still fetching or force update or state changed
+                        const progressFill = document.getElementById('progressFill');
+                        const statusText = document.getElementById('statusText');
+                        const currentDate = document.getElementById('currentDate');
+                        const batchInfo = document.getElementById('batchInfo');
                         
-                        // Update system status
-                        updateSystemStatus(data);
+                        statusText.textContent = `Fetched: ${data.current_records.toLocaleString()} records`;
+                        currentDate.textContent = `Current date: ${data.current_date}`;
+                        batchInfo.textContent = `Processing batches with dynamic limit adjustment...`;
                         
-                        // Check if state changed significantly
-                        const stateChanged = 
-                            data.is_fetching !== lastProgressState.is_fetching ||
-                            data.current_records !== lastProgressState.current_records ||
-                            data.total_records !== lastProgressState.total_records ||
-                            data.is_complete !== lastProgressState.is_complete;
+                        // Progress indicator - different max for test vs full mode
+                        const maxRecords = data.is_test_mode ? 43200 : 3500000;
+                        const progress = data.current_records > 0 ? Math.min((data.current_records / maxRecords) * 100, 100) : 0;
+                        progressFill.style.width = progress + '%';
                         
-                        lastProgressState = data;
-                        
-                        // COMPLETION DETECTION - Multiple conditions
-                        const isComplete = (
-                            data.is_complete ||
-                            (!data.is_fetching && data.total_records > 0) ||
-                            (!data.is_fetching && !data.error && data.current_records > 0)
-                        );
-                        
-                        if (isComplete && data.total_records > 0) {
-                            // Fetching completed successfully
-                            console.log('✅ Completion detected! Stopping interval and showing success');
-                            updateDebugInfo('Completion detected! Stopping progress interval');
-                            clearInterval(progressInterval);
-                            showSuccess(data.total_records, data.completion_time || new Date().toLocaleString(), data.is_test_mode);
-                        } else if (!data.is_fetching && data.error) {
-                            // Error occurred
-                            console.log('❌ Error detected:', data.error);
-                            updateDebugInfo('Error detected: ' + data.error);
-                            clearInterval(progressInterval);
-                            showError('Fetching error: ' + data.error);
-                        } else if (data.is_fetching || force || stateChanged) {
-                            // Still fetching or force update or state changed
-                            const progressFill = document.getElementById('progressFill');
-                            const statusText = document.getElementById('statusText');
-                            const currentDate = document.getElementById('currentDate');
-                            const batchInfo = document.getElementById('batchInfo');
-                            
-                            statusText.textContent = `Fetched: ${data.current_records.toLocaleString()} records`;
-                            currentDate.textContent = `Current date: ${data.current_date}`;
-                            batchInfo.textContent = `Processing batches with dynamic limit adjustment...`;
-                            
-                            // Progress indicator - different max for test vs full mode
-                            const maxRecords = data.is_test_mode ? 43200 : 3500000;
-                            const progress = data.current_records > 0 ? Math.min((data.current_records / maxRecords) * 100, 100) : 0;
-                            progressFill.style.width = progress + '%';
-                            
-                            if (debugEnabled) {
-                                updateDebugInfo(`Progress: ${progress.toFixed(1)}% (${data.current_records}/${maxRecords})`);
-                            }
+                        if (debugEnabled) {
+                            updateDebugInfo(`Progress: ${progress.toFixed(1)}% (${data.current_records}/${maxRecords})`);
                         }
-                    })
-                    .catch(error => {
-                        console.error('Error updating progress:', error);
-                        updateDebugInfo('Progress update error: ' + error);
-                    });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error updating progress:', error);
+                    updateConnectionStatus(false, error.message);
+                    updateDebugInfo('Progress update error: ' + error.message);
+                });
             }
             
             // Initialize when page loads
@@ -797,9 +901,18 @@ def index():
                 initializeAutoUpdate();
                 
                 // Do initial state check
-                fetch('/progress?' + new Date().getTime())
-                    .then(response => response.json())
+                fetch('/progress?' + new Date().getTime(), { 
+                    signal: AbortSignal.timeout(10000)
+                })
+                    .then(response => {
+                        const contentType = response.headers.get('content-type');
+                        if (!contentType || !contentType.includes('application/json')) {
+                            throw new Error(`Server returned HTML instead of JSON. Status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
                     .then(data => {
+                        updateConnectionStatus(true);
                         updateSystemStatus(data);
                         updateSystemUpdateTime(data.last_update);
                         
@@ -814,6 +927,11 @@ def index():
                         } else if (data.total_records > 0 || data.is_complete) {
                             showSuccess(data.total_records, data.completion_time || 'Unknown', data.is_test_mode);
                         }
+                    })
+                    .catch(error => {
+                        console.error('Initial load error:', error);
+                        updateConnectionStatus(false, error.message);
+                        updateDebugInfo('Initial load error: ' + error.message);
                     });
             });
             
@@ -836,79 +954,33 @@ def index():
 @app.route('/start-fetch', methods=['POST'])
 def start_fetch():
     """Start the full data fetching process"""
-    if fetching_status['is_fetching']:
-        return jsonify({'success': False, 'message': 'Already fetching data'})
-    
-    success = start_fetching_thread(test_mode=False)
-    return jsonify({'success': success})
+    try:
+        if fetching_status['is_fetching']:
+            return jsonify({'success': False, 'message': 'Already fetching data'})
+        
+        success = start_fetching_thread(test_mode=False)
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
 @app.route('/start-test-fetch', methods=['POST'])
 def start_test_fetch():
     """Start the test data fetching process (1 month)"""
-    if fetching_status['is_fetching']:
-        return jsonify({'success': False, 'message': 'Already fetching data'})
-    
-    success = start_fetching_thread(test_mode=True)
-    return jsonify({'success': success})
+    try:
+        if fetching_status['is_fetching']:
+            return jsonify({'success': False, 'message': 'Already fetching data'})
+        
+        success = start_fetching_thread(test_mode=True)
+        return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
 @app.route('/cancel-fetch', methods=['POST'])
 def cancel_fetch():
     """Cancel the data fetching process"""
-    global fetching_status
-    fetching_status['is_fetching'] = False
-    update_last_update_time()
-    return jsonify({'success': True})
-
-@app.route('/progress')
-def get_progress():
-    """Get the current fetching progress"""
-    # Update last update time when progress is checked
-    update_last_update_time()
-    return jsonify(fetching_status)
-
-@app.route('/api/data')
-def api_data():
-    """Return data as JSON (first 5 records for preview)"""
-    if fetching_status['dataframe'] is not None and not fetching_status['dataframe'].empty:
-        return fetching_status['dataframe'].head().to_json(orient='records', date_format='iso')
-    return jsonify([])
-
-@app.route('/download')
-def download_file():
-    """Download the CSV file"""
-    if fetching_status['dataframe'] is None or fetching_status['dataframe'].empty:
-        return "No data available. Please fetch data first.", 400
-    
-    # Create a StringIO object to serve the file in memory
-    csv_buffer = io.StringIO()
-    fetching_status['dataframe'].to_csv(csv_buffer, index=False)
-    csv_buffer.seek(0)
-    
-    # Create a BytesIO object from the StringIO
-    mem = io.BytesIO()
-    mem.write(csv_buffer.getvalue().encode('utf-8'))
-    mem.seek(0)
-    csv_buffer.close()
-    
-    # Different filename for test vs full mode
-    if fetching_status['is_test_mode']:
-        filename = f"bitcoin_1m_ohlcv_TEST_1month_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    else:
-        filename = f"bitcoin_1m_ohlcv_FULL_historical_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    
-    return send_file(
-        mem,
-        as_attachment=True,
-        download_name=filename,
-        mimetype='text/csv'
-    )
-
-if __name__ == '__main__':
-    print("Starting web server on http://localhost:8080")
-    print("Visit the page to fetch Bitcoin OHLCV data")
-    print("Options:")
-    print("  - 🚀 Fetch Full Historical Data: All data from 2018-01-01 to now (~3M+ records)")
-    print("  - 🧪 Test Download (Last 30 Days): Quick download of last month only (~43K records)")
-    print("  - 🔄 Page auto-updates every 5 seconds")
-    print("  - 🔧 Now properly handles incomplete final chunks (like 256 candles)")
-    app.run(host='0.0.0.0', port=8080, debug=False, threaded=True)
+    try:
+        fetching_status['is_fetching'] = False
+        update_last_update_time()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success':
