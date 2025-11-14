@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
+import time
 
 # Assuming binance_ohlc module exists with get_ohlc function
 try:
