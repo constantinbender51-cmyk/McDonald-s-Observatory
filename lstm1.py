@@ -31,7 +31,7 @@ MIN_DIRECTION_CHANGE_PCT = 0.001
 
 # --- Backtest Parameters ---
 INITIAL_CAPITAL = 10000.0
-PREDICTION_THRESHOLD = 0.51 
+PREDICTION_THRESHOLD = 0.55 
 
 def download_and_load_data(file_id, csv_name):
     """
@@ -158,16 +158,16 @@ def build_model(look_back, num_features):
 
 def run_backtest(predictions_prob, test_data_raw, initial_capital, pred_threshold):
     """
-    UPDATED: Runs a fixed 1-hour trade simulation: 
-    If P(UP) > threshold, BUY at current close and SELL at next close.
+    REVERTED: Runs a "hold-until-signal" trading simulation based on model's predicted probability.
     """
-    print(f"\n--- Running Backtest Simulation (FIXED 1-HOUR TRADE) ---")
+    print(f"\n--- Running Backtest Simulation (Hold-Until-Signal: Threshold={pred_threshold}) ---")
     capital = initial_capital
+    shares = 0 # Track shares for hold logic
     portfolio_values = []
     trade_count = 0
     
-    # trade_prices is aligned so trade_prices.iloc[i] is the entry price,
-    # and trade_prices.iloc[i+1] is the liquidation price one hour later.
+    # Prices aligned with the trading events. 
+    # trade_prices[i] is the price at which the decision (based on prediction[i]) is executed.
     trade_prices = test_data_raw.iloc[1:len(predictions_prob) + 1]
     
     if len(predictions_prob) > len(trade_prices):
@@ -179,41 +179,63 @@ def run_backtest(predictions_prob, test_data_raw, initial_capital, pred_threshol
         
         # predicted_prob_up is the probability that price will go up over the next period
         predicted_prob_up = predictions_prob[i][0]
-        entry_price = trade_prices.iloc[i] 
-        exit_price = trade_prices.iloc[i+1] # Price at the close of the next bar
+        execution_price = trade_prices.iloc[i] 
+        next_price = trade_prices.iloc[i+1] # Price at the end of the holding period
 
-        action = "SKIP"
-        trade_return_pct = 0.0
+        action = "HOLD"
 
         # --- Strategy Logic (Trade at the Close/Execution Price) ---
         
-        # BUY and immediately calculate return for the next hour
-        if predicted_prob_up > pred_threshold:
-            # Calculate the return achieved over the next hour (entry at entry_price, exit at exit_price)
-            trade_return_pct = (exit_price - entry_price) / entry_price
-            
-            # Apply the return (positive or negative) to the entire capital base
-            capital *= (1.0 + trade_return_pct)
+        # BUY: If we are flat AND we predict a high probability of UP
+        if predicted_prob_up > pred_threshold and shares == 0:
+            shares = capital / execution_price
+            capital = 0
             trade_count += 1
-            action = "BUY & SELL (1H)"
+            action = "BUY"
 
+
+        # SELL: If we are long AND we predict a low probability of UP (i.e., high prob of DOWN/SIDEWAYS)
+        # We use 1 - pred_prob for conviction in a down move (1.0 - 0.55 = 0.45)
+        elif predicted_prob_up < (1.0 - pred_threshold) and shares > 0:
+            # Liquidate position at the current execution price
+            capital = shares * execution_price
+            shares = 0
+            trade_count += 1
+            action = "SELL"
+        
         # Print prediction log with delay for the first 1000 steps
         if i < 1000:
+            # Calculate the actual return of holding for the next period for comparison
+            actual_change_pct = (next_price - execution_price) / execution_price
             
-            print(f"Time: {trade_prices.index[i]} | Entry Price: {entry_price:.2f} | Exit Price: {exit_price:.2f} | Pred Prob UP: {predicted_prob_up:.4f} | Trade Return: {trade_return_pct * 100:+.2f}% | Action: {action}")
+            print(f"Time: {trade_prices.index[i]} | Exec Price: {execution_price:.2f} | Next Price: {next_price:.2f} | Pred Prob UP: {predicted_prob_up:.4f} | Actual Change: {actual_change_pct * 100:.2f}% | Action: {action}")
             time.sleep(0.1)
 
-        # Update portfolio value at the end of the bar (after the 1H trade is complete or skipped)
-        portfolio_values.append(capital)
+        # --- Portfolio Value Calculation ---
+        # If long, the value changes with the price of the next bar
+        if shares > 0:
+            current_portfolio_value = shares * next_price
+        else:
+            current_portfolio_value = capital
+            
+        portfolio_values.append(current_portfolio_value)
         
-    final_capital = capital
+    # Final liquidation
+    final_price = trade_prices.iloc[-1]
+    if shares > 0:
+        final_capital = shares * final_price
+    else:
+        final_capital = capital
         
     # --- Performance Metrics ---
     total_return_pct = ((final_capital - initial_capital) / initial_capital) * 100
     
+    # Check if we have portfolio values before calculating drawdown
     if portfolio_values:
+        # Use the index from the trade prices for the portfolio series
         portfolio_series = pd.Series(portfolio_values, index=trade_prices.index[:len(portfolio_values)])
         cumulative_max = portfolio_series.cummax()
+        # Handle division by zero
         drawdown = (portfolio_series - cumulative_max) / cumulative_max.replace(0, 1) 
         max_drawdown_pct = drawdown.min() * 100
     else:
