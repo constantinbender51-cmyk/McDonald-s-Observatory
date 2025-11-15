@@ -13,4 +13,4 @@ gunicorn
 ccxt
 python-binance
 pandas_ta
-tensorflow
+tensorflow-cpu
