@@ -270,7 +270,7 @@ def call_gemini_api(user_message):
     
     full_prompt = f"{system_prompt}\n\nUser request: {user_message}"
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
     
     headers = {
         "Content-Type": "application/json"
