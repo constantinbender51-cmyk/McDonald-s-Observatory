@@ -22,16 +22,16 @@ GD_FILE_ID = '1kDCl_29nXyW1mLNUAS-nsJe0O2pOuO6o'
 CSV_FILE_NAME = '1m.csv' 
 
 # --- Model & Data Parameters ---
-LOOK_BACK = 12
+LOOK_BACK = 48
 TRAIN_SPLIT_RATIO = 0.7 
-FEATURES = ['close', 'volume', 'macd', 'macd_signal']
+FEATURES = ['close', 'volume', 'macd', 'macd_signal', 'macd_ratio']
 TARGET = 'direction' 
 MAX_SAMPLES = 5000
-MIN_DIRECTION_CHANGE_PCT = 0.005 
+MIN_DIRECTION_CHANGE_PCT = 0.001 
 
 # --- Backtest Parameters ---
 INITIAL_CAPITAL = 10000.0
-PREDICTION_THRESHOLD = 0.50 
+PREDICTION_THRESHOLD = 0.55 
 
 def download_and_load_data(file_id, csv_name):
     """
@@ -95,10 +95,15 @@ def preprocess_data(df):
         df_1h['EMA_26'] = df_1h['close'].ewm(span=26, adjust=False).mean()
         df_1h['macd'] = df_1h['EMA_12'] - df_1h['EMA_26']
         df_1h['macd_signal'] = df_1h['macd'].ewm(span=9, adjust=False).mean()
+
+        # --- 5. Calculate MACD Ratio (MACD / Signal) ---
+        # Calculate ratio and safely handle division by zero (replace inf/-inf with 0, then fill NaN with 0)
+        df_1h['macd_ratio'] = df_1h['macd'] / df_1h['macd_signal']
+        df_1h['macd_ratio'] = df_1h['macd_ratio'].replace([np.inf, -np.inf], 0).fillna(0)
         
         df_1h = df_1h.drop(columns=['EMA_12', 'EMA_26'])
         
-        # --- 5. Final Data Cleaning and Type Conversion ---
+        # --- 6. Final Data Cleaning and Type Conversion ---
         df_1h = df_1h.dropna()
         df_1h = df_1h.astype(np.float32)
 
@@ -248,6 +253,11 @@ def main():
     # --- 3. Slice Data to MAX_SAMPLES ---
     print(f"Slicing to the last {MAX_SAMPLES} hours of data.")
     df_features_sliced = df_1h.tail(MAX_SAMPLES)
+    
+    # --- Print requested features for verification ---
+    print("\n--- First 5 rows of features for verification ---")
+    print(df_features_sliced[FEATURES].head())
+    print("--------------------------------------------------")
 
     # --- 4. Scale Data ---
     print(f"Scaling data using features: {FEATURES}...")
