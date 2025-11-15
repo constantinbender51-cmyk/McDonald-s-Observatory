@@ -22,16 +22,16 @@ GD_FILE_ID = '1kDCl_29nXyW1mLNUAS-nsJe0O2pOuO6o'
 CSV_FILE_NAME = '1m.csv' 
 
 # --- Model & Data Parameters ---
-LOOK_BACK = 48
+LOOK_BACK = 24
 TRAIN_SPLIT_RATIO = 0.7 
-FEATURES = ['close', 'volume', 'macd', 'macd_signal'] 
+FEATURES = ['close', 'volume', 'macd', 'macd_signal']
 TARGET = 'direction' 
 MAX_SAMPLES = 5000
-MIN_DIRECTION_CHANGE_PCT = 0.001 
+MIN_DIRECTION_CHANGE_PCT = 0.005 
 
 # --- Backtest Parameters ---
 INITIAL_CAPITAL = 10000.0
-PREDICTION_THRESHOLD = 0.55 
+PREDICTION_THRESHOLD = 0.50 
 
 def download_and_load_data(file_id, csv_name):
     """
@@ -95,7 +95,7 @@ def preprocess_data(df):
         df_1h['EMA_26'] = df_1h['close'].ewm(span=26, adjust=False).mean()
         df_1h['macd'] = df_1h['EMA_12'] - df_1h['EMA_26']
         df_1h['macd_signal'] = df_1h['macd'].ewm(span=9, adjust=False).mean()
-
+        
         df_1h = df_1h.drop(columns=['EMA_12', 'EMA_26'])
         
         # --- 5. Final Data Cleaning and Type Conversion ---
@@ -158,16 +158,13 @@ def build_model(look_back, num_features):
 
 def run_backtest(predictions_prob, test_data_raw, initial_capital, pred_threshold):
     """
-    Runs a fixed 1-hour trade simulation: 
+    UPDATED: Runs a fixed 1-hour trade simulation: 
     If P(UP) > threshold, BUY at current close and SELL at next close.
-    Also calculates profitable vs unprofitable trades.
     """
     print(f"\n--- Running Backtest Simulation (FIXED 1-HOUR TRADE: Threshold={pred_threshold}) ---")
     capital = initial_capital
     portfolio_values = []
     trade_count = 0
-    profitable_trades = 0
-    unprofitable_trades = 0
     
     # trade_prices is aligned so trade_prices.iloc[i] is the entry price,
     # and trade_prices.iloc[i+1] is the liquidation price one hour later.
@@ -200,12 +197,6 @@ def run_backtest(predictions_prob, test_data_raw, initial_capital, pred_threshol
             trade_count += 1
             action = "BUY & SELL (1H)"
 
-            # Track profitability based on the realized return
-            if trade_return_pct > 0:
-                profitable_trades += 1
-            else:
-                unprofitable_trades += 1
-
         # Print prediction log with delay for the first 1000 steps
         if i < 1000:
             
@@ -230,8 +221,6 @@ def run_backtest(predictions_prob, test_data_raw, initial_capital, pred_threshol
 
     print(f"\n--- Final Backtest Results ---")
     print(f"Total Trades Executed: {trade_count}")
-    print(f"Profitable Trades:   {profitable_trades}")
-    print(f"Unprofitable Trades: {unprofitable_trades}")
     print(f"Initial Capital: ${initial_capital:,.2f}")
     print(f"Final Capital:   ${final_capital:,.2f}")
     print(f"Total Return:    {total_return_pct:,.2f}%")
@@ -259,19 +248,11 @@ def main():
     # --- 3. Slice Data to MAX_SAMPLES ---
     print(f"Slicing to the last {MAX_SAMPLES} hours of data.")
     df_features_sliced = df_1h.tail(MAX_SAMPLES)
-    
+
     # --- 4. Scale Data ---
     print(f"Scaling data using features: {FEATURES}...")
     scaler = MinMaxScaler(feature_range=(0, 1))
     data_scaled = scaler.fit_transform(df_features_sliced[FEATURES])
-    
-    # --- Print requested scaled features for verification ---
-    print("\n--- First 5 rows of SCALED features (Values between 0 and 1) ---")
-    
-    # Create a temporary DataFrame for clean printing of the scaled data
-    scaled_df_sample = pd.DataFrame(data_scaled[:5], columns=FEATURES)
-    print(scaled_df_sample)
-    print("------------------------------------------------------------------")
 
     # Get the raw 'close' prices for target creation and backtesting
     raw_close_prices_all = df_features_sliced['close'].values
