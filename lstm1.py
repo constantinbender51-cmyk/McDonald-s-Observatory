@@ -24,8 +24,8 @@ CSV_FILE_NAME = '1m.csv'
 # --- Model & Data Parameters ---
 LOOK_BACK = 12
 TRAIN_SPLIT_RATIO = 0.7 
-# UPDATED: Using 'log_return' instead of raw 'close' price
-FEATURES = ['log_return', 'volume', 'macd', 'macd_signal'] 
+# UPDATED: Features now include log returns, log volume change, MACD, and MACD Signal.
+FEATURES = ['log_return', 'log_volume_change', 'macd', 'macd_signal'] 
 TARGET = 'direction' 
 MAX_SAMPLES = 5000
 MIN_DIRECTION_CHANGE_PCT = 0.005 
@@ -91,14 +91,18 @@ def preprocess_data(df):
         for col in ['open', 'high', 'low']:
             df_1h[col] = df_1h[col].fillna(df_1h['close'])
             
-        # --- 4. Calculate MACD (12, 26, 9) and Log Returns ---
+        # --- 4. Calculate MACD (12, 26, 9), Log Returns, and Log Volume Change ---
         df_1h['EMA_12'] = df_1h['close'].ewm(span=12, adjust=False).mean()
         df_1h['EMA_26'] = df_1h['close'].ewm(span=26, adjust=False).mean()
         df_1h['macd'] = df_1h['EMA_12'] - df_1h['EMA_26']
         df_1h['macd_signal'] = df_1h['macd'].ewm(span=9, adjust=False).mean()
         
-        # NEW: Calculate Log Returns (Price_t / Price_{t-1})
+        # ADDED BACK: Calculate Log Returns (Price_t / Price_{t-1})
         df_1h['log_return'] = np.log(df_1h['close'] / df_1h['close'].shift(1))
+        
+        # KEEPING: Calculate Log Volume Change
+        # We add 1e-9 to prevent log(0)
+        df_1h['log_volume_change'] = np.log((df_1h['volume'] + 1e-9) / (df_1h['volume'].shift(1) + 1e-9))
 
         # Drop only the intermediate EMA columns
         df_1h = df_1h.drop(columns=['EMA_12', 'EMA_26'])
@@ -258,7 +262,6 @@ def main():
 
     # --- 4. Scale Data ---
     print(f"Scaling data using features: {FEATURES}...")
-    # Now scaling the log returns, volume, macd, and macd_signal
     scaler = MinMaxScaler(feature_range=(0, 1))
     data_scaled = scaler.fit_transform(df_features_sliced[FEATURES])
 
