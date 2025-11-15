@@ -9,6 +9,8 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import accuracy_score
+# NEW: Import for calculating class weights
+from sklearn.utils import class_weight
 import warnings
 
 # Suppress TensorFlow logging
@@ -23,7 +25,6 @@ CSV_FILE_NAME = '1m.csv'
 # --- Model & Data Parameters ---
 LOOK_BACK = 48
 TRAIN_SPLIT_RATIO = 0.7 
-# UPDATED: Added MACD and MACD Signal as features
 FEATURES = ['close', 'volume', 'macd', 'macd_signal']
 TARGET = 'direction' 
 MAX_SAMPLES = 5000
@@ -307,6 +308,16 @@ def main():
     X_train, X_test = X[:split_index], X[split_index:]
     y_train, y_test = y[:split_index], y[split_index:]
 
+    # NEW: Calculate Class Weights for Imbalance Correction
+    # This addresses why the prediction is always low (defaulting to the prior probability)
+    weights = class_weight.compute_class_weight(
+        class_weight='balanced',
+        classes=np.unique(y_train),
+        y=y_train
+    )
+    class_weights = dict(enumerate(weights))
+    print(f"Calculated Class Weights: {class_weights}")
+    
     # Get the raw 'close' prices for the test set for backtesting
     # This is the original index where the test set starts
     test_start_index = len(raw_close_prices_all) - len(y) + split_index
@@ -328,7 +339,9 @@ def main():
         batch_size=64,   
         validation_data=(X_test, y_test),
         shuffle=False,   
-        verbose=2
+        verbose=2,
+        # NEW: Apply class weights to mitigate imbalance
+        class_weight=class_weights
     )
 
     # --- 8. Evaluate Model (Classification) ---
