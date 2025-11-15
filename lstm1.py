@@ -21,7 +21,7 @@ GD_FILE_ID = '1kDCl_29nXyW1mLNUAS-nsJe0O2pOuO6o'
 CSV_FILE_NAME = '1m.csv' 
 
 # --- Model & Data Parameters ---
-LOOK_BACK = 48
+LOOK_BACK = 24
 TRAIN_SPLIT_RATIO = 0.7 
 FEATURES = ['close', 'volume']
 TARGET = 'direction' # NEW: Target is now directional
@@ -32,7 +32,7 @@ MIN_DIRECTION_CHANGE_PCT = 0.001
 # --- Backtest Parameters ---
 INITIAL_CAPITAL = 10000.0
 # NEW: Probability threshold for making a trade (1=UP, 0=DOWN/STAY)
-PREDICTION_THRESHOLD = 0.55 
+PREDICTION_THRESHOLD = 0.35
 
 def download_and_load_data(file_id, csv_name):
     """
