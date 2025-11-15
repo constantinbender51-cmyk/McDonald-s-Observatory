@@ -21,7 +21,7 @@ GD_FILE_ID = '1kDCl_29nXyW1mLNUAS-nsJe0O2pOuO6o'
 CSV_FILE_NAME = '1m.csv' 
 
 # --- Model & Data Parameters ---
-LOOK_BACK = 48
+LOOK_BACK = 480
 TRAIN_SPLIT_RATIO = 0.7 
 FEATURES = ['close', 'volume']
 TARGET = 'direction' # NEW: Target is now directional
