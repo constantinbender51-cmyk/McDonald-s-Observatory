@@ -8,7 +8,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, accuracy_score
+from sklearn.metrics import accuracy_score
 import warnings
 
 # Suppress TensorFlow logging
@@ -21,18 +21,17 @@ GD_FILE_ID = '1kDCl_29nXyW1mLNUAS-nsJe0O2pOuO6o'
 CSV_FILE_NAME = '1m.csv' 
 
 # --- Model & Data Parameters ---
-LOOK_BACK = 24
+LOOK_BACK = 48
 TRAIN_SPLIT_RATIO = 0.7 
-FEATURES = ['close', 'volume']
-TARGET = 'direction' # NEW: Target is now directional
+# UPDATED: Added MACD and MACD Signal as features
+FEATURES = ['close', 'volume', 'macd', 'macd_signal']
+TARGET = 'direction' 
 MAX_SAMPLES = 5000
-# NEW: Threshold for defining an 'Up' movement (Classification Target)
 MIN_DIRECTION_CHANGE_PCT = 0.001 
 
 # --- Backtest Parameters ---
 INITIAL_CAPITAL = 10000.0
-# NEW: Probability threshold for making a trade (1=UP, 0=DOWN/STAY)
-PREDICTION_THRESHOLD = 0.35
+PREDICTION_THRESHOLD = 0.55 
 
 def download_and_load_data(file_id, csv_name):
     """
@@ -61,14 +60,13 @@ def download_and_load_data(file_id, csv_name):
 
 def preprocess_data(df):
     """
-    Resamples 1-minute data to 1-hour and handles missing values.
+    Resamples 1-minute data to 1-hour, calculates technical indicators, and handles missing values.
     """
-    print("Preprocessing data...")
+    print("Preprocessing data and calculating technical indicators...")
     try:
         # --- 1. Convert Timestamp and Set Index ---
         df['datetime'] = pd.to_datetime(df['timestamp'])
         df = df.set_index('datetime')
-        print(f"Original data range: {df.index.min()} to {df.index.max()}")
         
         ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
         for col in ohlcv_cols:
@@ -77,7 +75,6 @@ def preprocess_data(df):
         df = df.drop(columns=['timestamp'])
         
         # --- 2. Resample to 1 Hour ---
-        print("Resampling data to 1-hour timeframe...")
         resample_rules = {
             'open': 'first',
             'high': 'max',
@@ -87,19 +84,33 @@ def preprocess_data(df):
         }
         df_1h = df.resample('1H').apply(resample_rules)
 
-        # --- 3. Handle Missing Data ---
+        # --- 3. Handle Missing Data (Intermediate) ---
         df_1h['close'] = df_1h['close'].ffill()
         df_1h['volume'] = df_1h['volume'].fillna(0)
         for col in ['open', 'high', 'low']:
             df_1h[col] = df_1h[col].fillna(df_1h['close'])
             
-        df_1h = df_1h.dropna()
+        # --- 4. Calculate MACD (12, 26, 9) ---
+        # 12-period EMA
+        df_1h['EMA_12'] = df_1h['close'].ewm(span=12, adjust=False).mean()
+        # 26-period EMA
+        df_1h['EMA_26'] = df_1h['close'].ewm(span=26, adjust=False).mean()
+
+        # MACD Line
+        df_1h['macd'] = df_1h['EMA_12'] - df_1h['EMA_26']
+
+        # Signal Line (9-period EMA of MACD)
+        df_1h['macd_signal'] = df_1h['macd'].ewm(span=9, adjust=False).mean()
         
-        # --- 4. Use float32 to save memory ---
+        # Drop temporary columns
+        df_1h = df_1h.drop(columns=['EMA_12', 'EMA_26'])
+        
+        # --- 5. Final Data Cleaning and Type Conversion ---
+        # Drop the initial NaNs created by the EMAs (approx. first 35 bars)
+        df_1h = df_1h.dropna()
         df_1h = df_1h.astype(np.float32)
 
-        print(f"Resampled data shape: {df_1h.shape}")
-        print(f"Resampled data range: {df_1h.index.min()} to {df_1h.index.max()}")
+        print(f"Resampled and feature-engineered data shape: {df_1h.shape}")
         return df_1h
 
     except Exception as e:
@@ -114,14 +125,11 @@ def create_sequences(data, raw_prices, look_back, min_change_pct):
     """
     X, y = [], []
     
-    # Raw prices are needed to calculate the direction for the target (y)
-    # The prices must align with the scaled data used in X
-    
     # We iterate over the scaled data (X)
-    # We use -1 because we need the price at i + look_back to calculate the change.
+    # The last index is reserved for the target price, which is not used in X
     for i in range(len(data) - look_back - 1): 
         
-        # X: The sequence of scaled feature data
+        # X: The sequence of scaled feature data for the last 'look_back' periods
         X.append(data[i:(i + look_back), :])
         
         # --- Calculate the price change percentage for the target (y) ---
@@ -133,9 +141,7 @@ def create_sequences(data, raw_prices, look_back, min_change_pct):
         price_change_pct = (next_price - current_price) / current_price
         
         # y: Directional label (1 for UP, 0 for DOWN/STAY)
-        # We classify UP only if the change exceeds the threshold
         if price_change_pct > min_change_pct:
-            # We predict the direction of the candle at index i + look_back
             y.append(1) # UP
         else:
             y.append(0) # DOWN or SIDWAYS
@@ -147,18 +153,18 @@ def build_model(look_back, num_features):
     Builds an LSTM model for Binary Classification (predicting direction).
     """
     print("Building LSTM model for DIRECTIONAL CLASSIFICATION...")
+    print(f"Input Shape: (Lookback={look_back}, Features={num_features})")
     model = Sequential()
     model.add(LSTM(
-        50,  # 50 units
+        50,  
         input_shape=(look_back, num_features),
         return_sequences=False
     ))
-    model.add(Dropout(0.2)) # Drop 20% of neurons to combat overfitting
+    model.add(Dropout(0.2)) # Drop 20% of neurons
     model.add(Dense(25, activation='relu'))
-    # NEW: Single output neuron with sigmoid for binary classification probability
     model.add(Dense(1, activation='sigmoid')) 
 
-    # NEW: Use binary_crossentropy loss and track accuracy
+    # Use binary_crossentropy loss and track accuracy
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     print(model.summary())
     return model
@@ -269,19 +275,21 @@ def main():
     if df_raw is None:
         return
 
-    # --- 2. Preprocess Data ---
+    # --- 2. Preprocess Data and Feature Engineer ---
     df_1h = preprocess_data(df_raw)
     if df_1h is None:
         return
         
     # --- 3. Slice Data to MAX_SAMPLES ---
-    print(f"Slicing to the last {MAX_SAMPLES} hours of data...")
-    df_features_sliced = df_1h[FEATURES].tail(MAX_SAMPLES)
+    print(f"Slicing to the last {MAX_SAMPLES} hours of data.")
+    # Ensure the dataframe has enough data after feature engineering to get 5000 samples
+    df_features_sliced = df_1h.tail(MAX_SAMPLES)
 
     # --- 4. Scale Data ---
-    print("Scaling data...")
+    print(f"Scaling data using features: {FEATURES}...")
+    # Scale only the features used in X
     scaler = MinMaxScaler(feature_range=(0, 1))
-    data_scaled = scaler.fit_transform(df_features_sliced)
+    data_scaled = scaler.fit_transform(df_features_sliced[FEATURES])
 
     # Get the raw 'close' prices for target creation and backtesting
     raw_close_prices_all = df_features_sliced['close'].values
@@ -300,7 +308,7 @@ def main():
     y_train, y_test = y[:split_index], y[split_index:]
 
     # Get the raw 'close' prices for the test set for backtesting
-    # The first index of the raw prices used for the first prediction in X_test
+    # This is the original index where the test set starts
     test_start_index = len(raw_close_prices_all) - len(y) + split_index
     test_closes_raw = df_features_sliced['close'].iloc[test_start_index:]
     
