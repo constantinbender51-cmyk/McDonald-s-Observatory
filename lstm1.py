@@ -22,9 +22,10 @@ GD_FILE_ID = '1kDCl_29nXyW1mLNUAS-nsJe0O2pOuO6o'
 CSV_FILE_NAME = '1m.csv' 
 
 # --- Model & Data Parameters ---
-LOOK_BACK = 24
+LOOK_BACK = 12
 TRAIN_SPLIT_RATIO = 0.7 
-FEATURES = ['close', 'volume', 'macd', 'macd_signal']
+# UPDATED: Replaced 'macd' and 'macd_signal' with the ratio feature
+FEATURES = ['close', 'volume', 'macd_over_signal'] 
 TARGET = 'direction' 
 MAX_SAMPLES = 5000
 MIN_DIRECTION_CHANGE_PCT = 0.005 
@@ -90,13 +91,22 @@ def preprocess_data(df):
         for col in ['open', 'high', 'low']:
             df_1h[col] = df_1h[col].fillna(df_1h['close'])
             
-        # --- 4. Calculate MACD (12, 26, 9) ---
+        # --- 4. Calculate MACD (12, 26, 9) and the new ratio feature ---
         df_1h['EMA_12'] = df_1h['close'].ewm(span=12, adjust=False).mean()
         df_1h['EMA_26'] = df_1h['close'].ewm(span=26, adjust=False).mean()
         df_1h['macd'] = df_1h['EMA_12'] - df_1h['EMA_26']
         df_1h['macd_signal'] = df_1h['macd'].ewm(span=9, adjust=False).mean()
         
-        df_1h = df_1h.drop(columns=['EMA_12', 'EMA_26'])
+        # New feature: MACD divided by MACD Signal
+        # Use a small epsilon (1e-8) in the denominator to prevent division by zero.
+        df_1h['macd_over_signal'] = df_1h['macd'] / (df_1h['macd_signal'] + 1e-8)
+        
+        # Clip the result to a reasonable range (e.g., -5 to 5) to prevent extreme outliers 
+        # when the signal line is near zero, which helps with normalization later.
+        df_1h['macd_over_signal'] = df_1h['macd_over_signal'].clip(-5.0, 5.0)
+
+        # Drop all intermediate and unused columns
+        df_1h = df_1h.drop(columns=['EMA_12', 'EMA_26', 'macd', 'macd_signal'])
         
         # --- 5. Final Data Cleaning and Type Conversion ---
         df_1h = df_1h.dropna()
@@ -158,7 +168,7 @@ def build_model(look_back, num_features):
 
 def run_backtest(predictions_prob, test_data_raw, initial_capital, pred_threshold):
     """
-    UPDATED: Runs a fixed 1-hour trade simulation: 
+    Runs a fixed 1-hour trade simulation: 
     If P(UP) > threshold, BUY at current close and SELL at next close.
     """
     print(f"\n--- Running Backtest Simulation (FIXED 1-HOUR TRADE: Threshold={pred_threshold}) ---")
