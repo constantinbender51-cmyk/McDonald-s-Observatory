@@ -23,7 +23,6 @@ CSV_FILE_NAME = '1m.csv' # The file is a direct CSV
 # --- Model & Data Parameters ---
 # Lookback window (in hours). You mentioned 48 or 480.
 # 48 is faster and uses less memory.
-# 480 will be more memory intensive but might capture longer trends.
 LOOK_BACK = 48
 TRAIN_SPLIT_RATIO = 0.8
 FEATURES = ['close', 'volume']
@@ -35,6 +34,7 @@ INITIAL_CAPITAL = 10000.0
 def download_and_load_data(file_id, csv_name):
     """
     Downloads the CSV file from Google Drive and loads it into a pandas DataFrame.
+    The file is assumed to have 6 columns: [timestamp, open, high, low, close, volume].
     """
     print(f"Downloading data from Google Drive (ID: {file_id})...")
     try:
@@ -42,11 +42,11 @@ def download_and_load_data(file_id, csv_name):
         gdown.download(id=file_id, output=csv_name, quiet=False)
         print(f"Download complete. Reading '{csv_name}'...")
 
-        # Read the CSV file
-        # Adjust 'names' if your CSV has different column headers
+        # Read the CSV file, explicitly naming 6 columns
+        # The first column is now assumed to be the full datetime stamp
         df = pd.read_csv(
             csv_name,
-            names=['date', 'time', 'open', 'high', 'low', 'close', 'volume'],
+            names=['timestamp', 'open', 'high', 'low', 'close', 'volume'],
             header=0 # Set to 0 if headers are present, None if not
         )
         
@@ -68,9 +68,9 @@ def preprocess_data(df):
     """
     print("Preprocessing data...")
     try:
-        # --- 1. Combine Date and Time ---
-        # Adjust format if your date/time is different
-        df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'])
+        # --- 1. Convert Timestamp and Set Index ---
+        # The 'timestamp' column is converted to datetime objects
+        df['datetime'] = pd.to_datetime(df['timestamp'])
         df = df.set_index('datetime')
         print(f"Original data range: {df.index.min()} to {df.index.max()}")
         
@@ -79,8 +79,8 @@ def preprocess_data(df):
         for col in ohlcv_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # Drop original date/time columns
-        df = df.drop(columns=['date', 'time'])
+        # Drop the original timestamp column
+        df = df.drop(columns=['timestamp'])
         
         # --- 2. Resample to 1 Hour ---
         print("Resampling data to 1-hour timeframe...")
@@ -115,7 +115,7 @@ def preprocess_data(df):
     except Exception as e:
         print(f"Error during preprocessing: {e}")
         print("Please check your CSV columns and date/time format.")
-        print("Expected columns: 'date', 'time', 'open', 'high', 'low', 'close', 'volume'")
+        print("Expected columns: 'timestamp', 'open', 'high', 'low', 'close', 'volume'")
         return None
 
 def create_sequences(data, look_back):
@@ -160,7 +160,6 @@ def run_backtest(predictions, test_data_raw, initial_capital):
 
     # Ensure predictions and test data align
     # We predict for t+1 at time t.
-    # The loop goes up to len(predictions)
     
     # test_data_raw should be the 'close' prices from the test set
     if len(predictions) > len(test_data_raw):
