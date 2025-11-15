@@ -28,11 +28,11 @@ TRAIN_SPLIT_RATIO = 0.7
 FEATURES = ['close', 'volume', 'macd', 'macd_signal']
 TARGET = 'direction' 
 MAX_SAMPLES = 5000
-MIN_DIRECTION_CHANGE_PCT = 0.0005
+MIN_DIRECTION_CHANGE_PCT = 0.001
 
 # --- Backtest Parameters ---
 INITIAL_CAPITAL = 10000.0
-PREDICTION_THRESHOLD = 0.52
+PREDICTION_THRESHOLD = 0.51
 
 def download_and_load_data(file_id, csv_name):
     """
