@@ -32,7 +32,7 @@ MIN_DIRECTION_CHANGE_PCT = 0.001
 # --- Backtest Parameters ---
 INITIAL_CAPITAL = 10000.0
 # NEW: Probability threshold for making a trade (1=UP, 0=DOWN/STAY)
-PREDICTION_THRESHOLD = 0.55 
+PREDICTION_THRESHOLD = 0.33
 
 def download_and_load_data(file_id, csv_name):
     """
