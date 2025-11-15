@@ -28,7 +28,7 @@ TRAIN_SPLIT_RATIO = 0.7
 FEATURES = ['close', 'volume', 'macd', 'macd_signal']
 TARGET = 'direction' 
 MAX_SAMPLES = 5000
-MIN_DIRECTION_CHANGE_PCT = 0.001 
+MIN_DIRECTION_CHANGE_PCT = 0.005 
 
 # --- Backtest Parameters ---
 INITIAL_CAPITAL = 10000.0
