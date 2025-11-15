@@ -1,5 +1,5 @@
 import os
-import time # NEW: For logging delay
+import time # For logging delay
 import io
 import gdown
 import pandas as pd
@@ -8,7 +8,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, accuracy_score
 import warnings
 
 # Suppress TensorFlow logging
@@ -22,16 +22,17 @@ CSV_FILE_NAME = '1m.csv'
 
 # --- Model & Data Parameters ---
 LOOK_BACK = 48
-# NEW: Adjusted train/test split
 TRAIN_SPLIT_RATIO = 0.7 
 FEATURES = ['close', 'volume']
-TARGET = 'close'
-# NEW: Use only the last 5000 hours of data
+TARGET = 'direction' # NEW: Target is now directional
 MAX_SAMPLES = 5000
+# NEW: Threshold for defining an 'Up' movement (Classification Target)
+MIN_DIRECTION_CHANGE_PCT = 0.001 
 
 # --- Backtest Parameters ---
 INITIAL_CAPITAL = 10000.0
-MIN_PRICE_CHANGE_PCT = 0.001 # 0.1% threshold
+# NEW: Probability threshold for making a trade (1=UP, 0=DOWN/STAY)
+PREDICTION_THRESHOLD = 0.55 
 
 def download_and_load_data(file_id, csv_name):
     """
@@ -106,22 +107,46 @@ def preprocess_data(df):
         print("Please check your CSV columns and date/time format.")
         return None
 
-def create_sequences(data, look_back):
+def create_sequences(data, raw_prices, look_back, min_change_pct):
     """
-    Creates sequences of data for the LSTM.
+    Creates sequences of data (X) and directional targets (y) for the LSTM.
+    y = 1 if price moves up by more than min_change_pct, else 0.
     """
     X, y = [], []
-    # We predict the 'close' price, which is the 0th column in our `data`
-    for i in range(len(data) - look_back):
+    
+    # Raw prices are needed to calculate the direction for the target (y)
+    # The prices must align with the scaled data used in X
+    
+    # We iterate over the scaled data (X)
+    # We use -1 because we need the price at i + look_back to calculate the change.
+    for i in range(len(data) - look_back - 1): 
+        
+        # X: The sequence of scaled feature data
         X.append(data[i:(i + look_back), :])
-        y.append(data[i + look_back, 0]) 
+        
+        # --- Calculate the price change percentage for the target (y) ---
+        # Price at the beginning of the prediction period (i + look_back - 1)
+        current_price = raw_prices[i + look_back - 1]
+        # Price at the end of the prediction period (i + look_back)
+        next_price = raw_prices[i + look_back] 
+        
+        price_change_pct = (next_price - current_price) / current_price
+        
+        # y: Directional label (1 for UP, 0 for DOWN/STAY)
+        # We classify UP only if the change exceeds the threshold
+        if price_change_pct > min_change_pct:
+            # We predict the direction of the candle at index i + look_back
+            y.append(1) # UP
+        else:
+            y.append(0) # DOWN or SIDWAYS
+            
     return np.array(X), np.array(y)
 
 def build_model(look_back, num_features):
     """
-    Builds an LSTM model with Dropout to prevent overfitting.
+    Builds an LSTM model for Binary Classification (predicting direction).
     """
-    print("Building LSTM model...")
+    print("Building LSTM model for DIRECTIONAL CLASSIFICATION...")
     model = Sequential()
     model.add(LSTM(
         50,  # 50 units
@@ -130,78 +155,92 @@ def build_model(look_back, num_features):
     ))
     model.add(Dropout(0.2)) # Drop 20% of neurons to combat overfitting
     model.add(Dense(25, activation='relu'))
-    model.add(Dense(1)) 
+    # NEW: Single output neuron with sigmoid for binary classification probability
+    model.add(Dense(1, activation='sigmoid')) 
 
-    model.compile(optimizer='adam', loss='mean_squared_error')
+    # NEW: Use binary_crossentropy loss and track accuracy
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     print(model.summary())
     return model
 
-def run_backtest(predictions, test_data_raw, initial_capital, min_change_pct):
+def run_backtest(predictions_prob, test_data_raw, initial_capital, pred_threshold):
     """
-    Runs a simple "long-only" trading simulation based on model predictions.
-    Now includes a minimum change threshold and prediction logging.
+    Runs a simple "long-only" trading simulation based on model's predicted probability.
     """
-    print(f"\n--- Running Backtest Simulation (Min Change: {min_change_pct * 100}%) ---")
+    print(f"\n--- Running Backtest Simulation (Prediction Threshold: {pred_threshold}) ---")
     capital = initial_capital
     shares = 0
     portfolio_values = []
     trade_count = 0
+    
+    # Prices aligned with the trading events. 
+    # trade_prices[i] is the price at which the decision (based on prediction[i]) is executed.
+    trade_prices = test_data_raw.iloc[1:len(predictions_prob) + 1]
+    
+    if len(predictions_prob) > len(trade_prices):
+        predictions_prob = predictions_prob[:len(trade_prices)]
+    elif len(trade_prices) > len(predictions_prob):
+         trade_prices = trade_prices.iloc[:len(predictions_prob)]
 
-    if len(predictions) > len(test_data_raw):
-        predictions = predictions[:len(test_data_raw)]
-    elif len(test_data_raw) > len(predictions):
-         test_data_raw = test_data_raw[:len(predictions)]
-
-    for i in range(len(predictions) - 1):
-        current_price = test_data_raw[i]
-        predicted_next_price = predictions[i][0]
+    for i in range(len(predictions_prob) - 1):
         
-        predicted_change_pct = (predicted_next_price - current_price) / current_price
+        # predicted_prob_up is the probability that price will go up over the next period
+        predicted_prob_up = predictions_prob[i][0]
+        execution_price = trade_prices.iloc[i] 
+        next_price = trade_prices.iloc[i+1] # Price at the end of the holding period
+
         action = "HOLD"
 
-        # --- Strategy Logic ---
+        # --- Strategy Logic (Trade at the Close/Execution Price) ---
         
-        # BUY: If we are flat AND we predict a rise above the threshold
-        if predicted_change_pct > min_change_pct and shares == 0:
-            shares = capital / current_price
+        # BUY: If we are flat AND we predict a high probability of UP
+        if predicted_prob_up > pred_threshold and shares == 0:
+            shares = capital / execution_price
             capital = 0
             trade_count += 1
             action = "BUY"
 
 
-        # SELL: If we are long AND we predict a drop below the negative threshold
-        elif predicted_change_pct < -min_change_pct and shares > 0:
-            capital = shares * current_price
+        # SELL: If we are long AND we predict a low probability of UP (i.e., high prob of DOWN/SIDEWAYS)
+        # We use 1 - pred_prob for conviction in a down move
+        elif predicted_prob_up < (1.0 - pred_threshold) and shares > 0:
+            # Liquidate position at the current execution price
+            capital = shares * execution_price
             shares = 0
             trade_count += 1
             action = "SELL"
         
-        # NEW: Print prediction log with delay for the first 1000 steps
+        # Print prediction log with delay for the first 1000 steps
         if i < 1000:
-            print(f"Time: {test_data_raw.index[i]} | Actual: {current_price:.2f} | Pred: {predicted_next_price:.2f} | Pct Change: {predicted_change_pct * 100:.2f}% | Action: {action}")
+            # Calculate the actual return of holding for the next period for comparison
+            actual_change_pct = (next_price - execution_price) / execution_price
+            
+            print(f"Time: {trade_prices.index[i]} | Exec Price: {execution_price:.2f} | Next Price: {next_price:.2f} | Pred Prob UP: {predicted_prob_up:.4f} | Actual Change: {actual_change_pct * 100:.2f}% | Action: {action}")
             time.sleep(0.1)
 
         # --- Portfolio Value Calculation ---
+        # If long, the value changes with the price of the next bar
         if shares > 0:
-            current_portfolio_value = shares * current_price
+            current_portfolio_value = shares * next_price
         else:
             current_portfolio_value = capital
             
         portfolio_values.append(current_portfolio_value)
-
-    # If still holding shares at the end, liquidate
-    if shares > 0:
-        capital = shares * test_data_raw.iloc[-1]
         
-    final_capital = capital
-
+    # Final liquidation
+    final_price = trade_prices.iloc[-1]
+    if shares > 0:
+        final_capital = shares * final_price
+    else:
+        final_capital = capital
+        
     # --- Performance Metrics ---
     total_return_pct = ((final_capital - initial_capital) / initial_capital) * 100
     
     # Check if we have portfolio values before calculating drawdown
     if portfolio_values:
-        # Use the index from the raw test data for the portfolio series
-        portfolio_series = pd.Series(portfolio_values, index=test_data_raw.index[:len(portfolio_values)])
+        # Use the index from the trade prices for the portfolio series
+        portfolio_series = pd.Series(portfolio_values, index=trade_prices.index[:len(portfolio_values)])
         cumulative_max = portfolio_series.cummax()
         # Handle division by zero
         drawdown = (portfolio_series - cumulative_max) / cumulative_max.replace(0, 1) 
@@ -236,7 +275,6 @@ def main():
         return
         
     # --- 3. Slice Data to MAX_SAMPLES ---
-    # We take the last 5000 hours of the clean, 1H data
     print(f"Slicing to the last {MAX_SAMPLES} hours of data...")
     df_features_sliced = df_1h[FEATURES].tail(MAX_SAMPLES)
 
@@ -245,12 +283,12 @@ def main():
     scaler = MinMaxScaler(feature_range=(0, 1))
     data_scaled = scaler.fit_transform(df_features_sliced)
 
-    scaler_close = MinMaxScaler(feature_range=(0, 1))
-    scaler_close.fit(df_features_sliced[['close']]) # Use sliced data for scaler fit
+    # Get the raw 'close' prices for target creation and backtesting
+    raw_close_prices_all = df_features_sliced['close'].values
 
     # --- 5. Create Sequences ---
-    print(f"Creating sequences with look-back of {LOOK_BACK} hours...")
-    X, y = create_sequences(data_scaled, LOOK_BACK)
+    print(f"Creating sequences with look-back of {LOOK_BACK} hours and directional target...")
+    X, y = create_sequences(data_scaled, raw_close_prices_all, LOOK_BACK, MIN_DIRECTION_CHANGE_PCT)
     
     if len(X) == 0:
         print("Error: No sequences created. Is data shorter than look_back?")
@@ -262,16 +300,15 @@ def main():
     y_train, y_test = y[:split_index], y[split_index:]
 
     # Get the raw 'close' prices for the test set for backtesting
-    # We take the raw prices corresponding to the X_test indices
-    raw_close_prices_all = df_features_sliced['close']
-    test_start_index = len(raw_close_prices_all) - len(y_test)
-    test_closes_raw = raw_close_prices_all.iloc[test_start_index:]
+    # The first index of the raw prices used for the first prediction in X_test
+    test_start_index = len(raw_close_prices_all) - len(y) + split_index
+    test_closes_raw = df_features_sliced['close'].iloc[test_start_index:]
     
     print(f"Train shapes: X={X_train.shape}, y={y_train.shape}")
     print(f"Test shapes:  X={X_test.shape}, y={y_test.shape}")
     print(f"Raw test closes for backtest: {test_closes_raw.shape}")
 
-    # --- 7. Build & Train Model ---
+    # --- 7. Build & Train Model (Classification) ---
     num_features = len(FEATURES)
     model = build_model(LOOK_BACK, num_features)
 
@@ -286,23 +323,23 @@ def main():
         verbose=2
     )
 
-    # --- 8. Evaluate Model ---
+    # --- 8. Evaluate Model (Classification) ---
     print("\n--- Model Evaluation ---")
-    predictions_scaled = model.predict(X_test)
     
-    # Inverse transform predictions and actual values
-    predictions_inv = scaler_close.inverse_transform(predictions_scaled)
-    y_test_inv = scaler_close.inverse_transform(y_test.reshape(-1, 1))
-
-    # Calculate metrics
-    rmse = np.sqrt(mean_squared_error(y_test_inv, predictions_inv))
-    mae = mean_absolute_error(y_test_inv, predictions_inv)
+    # Predict probabilities
+    predictions_prob = model.predict(X_test)
     
-    print(f"Test Set RMSE (Root Mean Squared Error): {rmse:.4f}")
-    print(f"Test Set MAE (Mean Absolute Error):     {mae:.4f}")
+    # Convert probabilities to classes (0 or 1) for accuracy calculation
+    predictions_class = (predictions_prob > 0.5).astype(int)
+    
+    # Calculate accuracy
+    accuracy = accuracy_score(y_test, predictions_class)
+    
+    print(f"Test Set Binary Cross-Entropy Loss (Lower is better): {history.history['val_loss'][-1]:.4f}")
+    print(f"Test Set Accuracy: {accuracy * 100:.2f}%")
     
     # --- 9. Run Backtest ---
-    run_backtest(predictions_inv, test_closes_raw, INITIAL_CAPITAL, MIN_PRICE_CHANGE_PCT)
+    run_backtest(predictions_prob, test_closes_raw, INITIAL_CAPITAL, PREDICTION_THRESHOLD)
 
 
 if __name__ == "__main__":
