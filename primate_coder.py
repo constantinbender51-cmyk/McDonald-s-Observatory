@@ -6,10 +6,10 @@ from flask import Flask, render_template_string, request, jsonify
 import requests
 
 # ==================== CONFIGURATION ====================
-GITHUB_USERNAME = "your-username"  # Replace with your GitHub username
-GITHUB_REPO = "your-repo"          # Replace with your repository name
+GITHUB_USERNAME = "constantinbender51-cmyk"  # Replace with your GitHub username
+GITHUB_REPO = "Primate-Coder"       # Replace with your repository name
 GITHUB_BRANCH = "main"             # Branch to commit to
-RAILWAY_APP_URL = "https://your-app.railway.app"  # Replace with your Railway app URL
+RAILWAY_APP_URL = "primate-coder-production.up.railway.app"  # Replace with your Railway app URL
 PORT = 8080
 
 # Environment variables (set these before running)
